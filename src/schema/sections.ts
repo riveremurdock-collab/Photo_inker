@@ -88,6 +88,18 @@ export const paletteSection = defineSection({
       default: "#f6f3ec",
       hidden: true,
     },
+    {
+      kind: "number",
+      key: "inkOpacity",
+      label: "Ink opacity",
+      perInk: true,
+      default: 0,
+      min: 0,
+      max: 100,
+      step: 1,
+      unit: "%",
+      help: "Riso inks are transparent (0%). Raise this for dense inks like metallics or white, which partly cover inks printed before them.",
+    },
   ],
 });
 

@@ -746,3 +746,90 @@ input.swatch-input {
   width: 56px;
   height: 36px;
 }
+
+/* ---- Ink mixing test view (temporary, Step 3) ---- */
+
+.ink-test-open {
+  justify-self: start;
+  margin-top: 4px;
+  border-style: dashed;
+}
+
+.ink-test {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  overflow: auto;
+  padding: 16px 24px 32px;
+  background: #fff;
+}
+
+.ink-test-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.ink-test-header h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 18px;
+}
+
+.ink-test-header p {
+  margin: 4px 0 0;
+  max-width: 560px;
+  font-size: 13px;
+  color: var(--color-dark-grey);
+}
+
+.ink-test-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.ink-test-legend {
+  margin: 12px 0 16px;
+  font-size: 12px;
+  color: var(--color-olive);
+}
+
+.ink-test-stage {
+  position: relative;
+}
+
+.ink-test-stage canvas {
+  display: block;
+}
+
+.ink-test-labels {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
+  pointer-events: none;
+}
+
+.ink-test-heading,
+.ink-test-label {
+  position: absolute;
+  margin: 0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ink-test-heading {
+  font-weight: 700;
+  color: var(--color-olive);
+}
+
+.ink-test-label {
+  text-align: center;
+  color: var(--color-dark-grey);
+}
+
+.ink-test-ramp-label {
+  text-align: right;
+}

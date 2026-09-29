@@ -157,18 +157,23 @@ This follows the outline's Rendering Engine section.
   - The base curves and CIE tables are vendored in `engine/spectral/spectral.ts` with the MIT notice.
 - **Transparent layering.**
   - Riso ink behaves like a transparent film.
-  - An ink's transmittance per band is derived from its chosen color printed on white: `T = sqrt(R_ink)`, so white paper × T² reproduces the swatch.
+  - An ink's transmittance per band is derived from its chosen color printed on white: `T² = R_ink / R_white`, so white paper × T² reproduces the swatch exactly (verified: every tested color round-trips to the same hex).
   - A pixel's color is `R_paper × Π T_i²` over the inks present, converted back to linear RGB.
+  - Code: `engine/spectral/inkModel.ts`.
 - **Opacity.** Per-ink opacity `a` blends toward the ink's own reflectance: `R = (1−a)·(R_below·T²) + a·R_ink`. The inks are applied in **print order**, so order matters only when opacity > 0.
-- **Overlap table.** The overlap table has 2ⁿ entries (paper, each ink, every overlap), computed on the CPU in linear RGB. It is rebuilt only when the palette, paper, print order or opacity changes.
-- **Partial coverage.**
-  - Binary halftoned pixels are a table lookup.
-  - Partial pixels (dot edges, None halftone, pre-halftone previews) run the spectral mix in the fragment shader: the ink curves are uploaded as uniforms, and coverage is interpolated per band.
-  - Exact formulas and GLSL are settled in Step 3.
+- **Overlap table.** The overlap table has 2ⁿ entries (paper, each ink, every overlap), computed on the CPU in linear RGB (about 0.04 ms for 4 inks).
+  - `OverlapTableCache` (`engine/spectral/overlapTable.ts`) rebuilds it only when the paper, ink colors, opacity, ink count or print order change.
+- **Partial coverage (GPU).**
+  - `mixInks()` in `engine/gl/inkShader.ts` averages the table entries weighted by coverage (Demichel weights: each ink covers its fraction of the pixel independently).
+  - Converting a spectrum to color is linear, so this equals running the spectral model band by band on the averaged spectrum. It also still holds with opacity, because each print step is linear in the reflectance underneath.
+  - It is cheaper than a 38-band loop per pixel, and it matches how a halftone looks from a distance, so smooth previews, halftoned previews, and zoomed-out views agree.
+  - A binary (halftoned) pixel is a special case: exactly one table entry.
+  - `mixCoverage()` is the same math on the CPU, for Ink Matching.
 - **Color pipeline.**
   - Linear light throughout: mixing, resizing, and zoomed-out averaging (mipmaps built in linear light) all happen in linear light.
-  - The final conversion is linear → sRGB with soft-knee gamut compression instead of a hard clip.
-- **Swappable model.** Rendering reads only the overlap table and the shader's ink model, so measured calibration can replace the spectral estimate later.
+  - **Gamut compression.** `gamutCompress()` handles colors that fall outside sRGB (vivid overlaps). They are desaturated toward their own luminance just enough to fit, which keeps their hue, instead of having each channel clipped. Colors inside sRGB are untouched, so a solid ink always shows exactly the picked color.
+- **Swappable model.** Rendering reads only the overlap table, so measured calibration (16 printed patches) can replace the spectral estimate later without changing the shader.
+- **Test view.** The temporary ink mixing test is `ui/inkTestView.ts`. It shows the swatch grid and ramps with Spectral, Multiply and Split modes, and is to be removed or hidden in Step 14.
 
 ## 7. Website embedding
 

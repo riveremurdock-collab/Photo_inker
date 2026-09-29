@@ -10,6 +10,7 @@ import { hexToRgb, srgbToLinearChannel } from "./util/color";
 import { PaletteActions } from "./app/palette";
 import { Eyedropper } from "./ui/preview/eyedropper";
 import { createPaletteBlock } from "./ui/sections/palette";
+import { InkTestView } from "./ui/inkTestView";
 
 const DEBUG = new URLSearchParams(location.search).has("debug");
 
@@ -113,6 +114,22 @@ function start(root: HTMLElement): void {
     (target, hex) => (target.kind === "ink" ? palette.setInkColor(target.slot, hex) : palette.setPaper(hex)),
   );
   const paletteBlock = createPaletteBlock(settings, source, palette, eyedropper);
+
+  // TEMPORARY (Step 3): ink mixing test view over the preview area.
+  const inkTest = new InkTestView(settings, DEBUG);
+  preview.element.append(inkTest.element);
+  const inkTestButton = document.createElement("button");
+  inkTestButton.type = "button";
+  inkTestButton.className = "ink-test-open";
+  inkTestButton.textContent = "Show ink mixing test";
+  inkTestButton.addEventListener("click", () => {
+    inkTest.toggle();
+    inkTestButton.textContent = inkTest.open ? "Hide ink mixing test" : "Show ink mixing test";
+  });
+  new MutationObserver(() => {
+    inkTestButton.textContent = inkTest.open ? "Hide ink mixing test" : "Show ink mixing test";
+  }).observe(inkTest.element, { attributes: true, attributeFilter: ["hidden"] });
+  paletteBlock.append(inkTestButton);
 
   const showPaper = () => {
     const rgb = hexToRgb(settings.get().palette.paper) ?? { r: 255, g: 255, b: 255 };

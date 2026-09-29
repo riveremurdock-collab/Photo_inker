@@ -7,8 +7,8 @@
 | 0 | Setup and architecture | ✅ Done |
 | 1 | Upload, modes, and preview canvas | ✅ Done |
 | 2 | Palette (basic) | ✅ Done |
-| 3 | Rendering engine core | ⏳ Next |
-| 4 | Image adjustments, color splitting (basic), shared layer options | — |
+| 3 | Rendering engine core | ✅ Done |
+| 4 | Image adjustments, color splitting (basic), shared layer options | ⏳ Next |
 | 5 | Halftone (basic) | — |
 | 6 | Export (basic) | — |
 | — | *End of basic build: overall report* | — |
@@ -82,6 +82,20 @@
 - **Transparent PNGs:** transparent areas show the paper color.
 - **Panel width:** widened to 370 px.
 - **Layout:** the settings panel is on the left and the preview on the right (user request). On narrow screens the preview stays above the panel.
+
+### Step 3
+- **spectral.js tables:** the base spectra, the CIE color matching functions (D65-weighted), and the XYZ→sRGB matrix were copied from spectral.js v3.0.0 (MIT) into `engine/spectral/spectral.ts`. They were generated from the npm package source, so the numbers are exact, and the license text is in the file header.
+- **Ink color meaning:** the picked ink color means "solid on white paper". On other papers, the ink is tinted by the paper, as real transparent ink would be.
+- **Partial coverage:** mixing uses Demichel weights over the overlap table. This is mathematically identical to the per-band spectral mix (see ARCHITECTURE §6), and it keeps the preview consistent with how halftones look from a distance. Mixed midtones of two inks look greyer than their solid overlap, as real two-ink halftones do.
+- **Gamut compression:** hue-preserving desaturation, applied only to out-of-gamut colors. In-gamut colors are exact.
+- **Multiply comparison:** a Photoshop-style multiply in sRGB: paper × each ink.
+- **Opacity:** per-ink opacity (0–100%, default 0%) is a regular per-ink setting. It is the first setting to use the generated per-ink control group, with one slider per ink labeled by its hex code.
+- **Test view:** the temporary ink test view opens from a dashed "Show ink mixing test" button in the Palette section and covers the preview area.
+- **Measured results:**
+  - White paper: Yellow #ffe800 + Blue #0078bf → #05712a (multiply gives #006d00).
+  - Pink #ff48b0 + Blue → #2f1982 (purple).
+  - Pink + Yellow → #fb480f.
+  - All three → #28241b.
 
 ## Open questions
 

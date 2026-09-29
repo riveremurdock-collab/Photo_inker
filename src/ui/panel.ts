@@ -98,6 +98,12 @@ export class Panel {
     const rows = document.createElement("div");
     rows.className = "control-group-rows";
     element.append(label, rows);
+    if (def.help) {
+      const help = document.createElement("p");
+      help.className = "control-help";
+      help.textContent = def.help;
+      element.append(help);
+    }
 
     let signature = "";
     let controls: Control[] = [];
