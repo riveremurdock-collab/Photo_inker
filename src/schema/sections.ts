@@ -1,6 +1,7 @@
 // Every section of the side panel, in workflow order. A section's settings are
 // defined here once; the panel, defaults, and (later) presets all read from this.
 
+import { SCHEMES } from "../app/colorSchemes";
 import { HALFTONE_SECTIONS, HALFTONE_TYPE_OPTIONS } from "../plugins/halftone/registry";
 import { SPLIT_METHOD_OPTIONS, SPLIT_SECTIONS } from "../plugins/splitting/registry";
 import { defineSection, type SectionValues } from "./types";
@@ -52,8 +53,35 @@ export const paletteSection = defineSection({
       stage: null,
       options: [
         { value: "manual", label: "Manual" },
+        { value: "scheme", label: "Scheme" },
         { value: "auto", label: "Auto" },
       ],
+    },
+    {
+      kind: "select",
+      key: "scheme",
+      label: "Scheme",
+      default: "triad",
+      hidden: true,
+      stage: null,
+      options: SCHEMES.map((sc) => ({ value: sc.id, label: `${sc.label} (${sc.count})` })),
+    },
+    {
+      kind: "toggle",
+      key: "schemeIncludeBackground",
+      label: "Include background in scheme",
+      default: false,
+      hidden: true,
+      stage: null,
+    },
+    {
+      // The scheme's first color (ink 1); the others are generated from it.
+      kind: "color",
+      key: "schemeBase",
+      label: "First color",
+      default: "#0078bf",
+      hidden: true,
+      stage: null,
     },
     {
       kind: "toggle",

@@ -1046,3 +1046,14 @@ input.swatch-input {
 .export-message {
   min-height: 1em;
 }
+
+/* Scheme mode: mark ink 1 as the color the others are generated from. */
+.ink-row.scheme-first .ink-order {
+  color: #fff;
+  background: var(--color-olive);
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  line-height: 16px;
+  font-size: 11px;
+}

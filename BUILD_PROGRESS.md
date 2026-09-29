@@ -12,8 +12,8 @@
 | 5 | Halftone (basic) | ✅ Done |
 | 6 | Export (basic) | ✅ Done |
 | — | *End of basic build: overall report* | ✅ Given 2026-09-29 |
-| 7 | Full palette options | — |
-| 8 | Remaining color splitting methods | — |
+| 7 | Full palette options | ✅ Done |
+| 8 | Remaining color splitting methods | ⏳ Next |
 | 9 | Complete shared layer options | — |
 | 10 | Remaining halftone types | — |
 | 11 | Border | — |
@@ -169,6 +169,21 @@
   - Riso at A3 width (7020 × 4681, 4 inks): 10.5 s, JS heap ~120 MB.
   - 6000 × 4000 image at 10 in / 600 DPI: 10.3 s.
 - **Panel:** can now place custom blocks after a section's generated controls.
+
+### Step 7
+- **Palette modes:** Colors is now Manual / Scheme / Auto.
+- **Scheme mode:**
+  - Ink 1 is the scheme's first color. Entering Scheme mode keeps the current ink 1.
+  - Changing ink 1 (picker, hex, or eyedropper) regenerates the rest, live while dragging.
+  - Editing another ink, or adding or removing an ink, switches to Manual (a scheme locks in its count).
+- **Generation:** `app/colorSchemes.ts` rotates hue in OKLCH at the first color's lightness and chroma, with chroma reduced only if needed to stay in sRGB.
+  - Complementary: 0/180°. Analogous: 0/±30°. Triad: 0/120/240°. Square: 0/90/180/270°.
+  - Monotone: the first color, a lighter tint (L +0.25), and a darker shade (L −0.25).
+  - CMYK analog: fixed #3255a4 (Medium Blue), #ff48b0 (Fluorescent Pink), #ffe800 (Yellow), #000000 (Black). These are approximate screen colors in one constant (`CMYK_ANALOG`), to replace with measured ink colors later.
+- **Include background in scheme:**
+  - The lightest scheme color other than the first takes the background slot, so the scheme gives one fewer ink.
+  - Because hue-rotated colors share the first color's lightness, that slot becomes a pale paper tint of the color (OKLCH L 0.95, gentle chroma), not the mid-tone itself. A mid-tone paper would bury the inks.
+  - Turning the option off restores the previous paper.
 
 ## Open questions
 

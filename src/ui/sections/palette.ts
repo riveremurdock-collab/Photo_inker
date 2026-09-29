@@ -73,7 +73,21 @@ export function createPaletteBlock(
   includeBgControl.element.classList.add("control-inline");
   const autoNote = document.createElement("p");
   autoNote.className = "control-help";
-  element.append(sourceControl.element, includeBgControl.element, autoNote);
+
+  // ---- Scheme ----
+  const schemeControl = createControl(findSetting("palette", "scheme")!, store.get().palette.scheme, (v) =>
+    store.setValue("palette", "scheme", v),
+  );
+  const schemeBgControl = createControl(
+    findSetting("palette", "schemeIncludeBackground")!,
+    store.get().palette.schemeIncludeBackground,
+    (v) => store.setValue("palette", "schemeIncludeBackground", v),
+  );
+  schemeBgControl.element.classList.add("control-inline");
+  const schemeNote = document.createElement("p");
+  schemeNote.className = "control-help";
+
+  element.append(sourceControl.element, schemeControl.element, schemeBgControl.element, includeBgControl.element, autoNote, schemeNote);
 
   // ---- Inks ----
   const inksHeading = document.createElement("div");
@@ -164,8 +178,18 @@ export function createPaletteBlock(
     const p = settings.palette;
     const hasImage = source.get() !== null;
     const isAuto = p.source === "auto";
+    const isScheme = p.source === "scheme";
 
     sourceControl.update(p.source);
+    schemeControl.update(p.scheme);
+    schemeBgControl.update(p.schemeIncludeBackground);
+    schemeControl.element.hidden = !isScheme;
+    schemeBgControl.element.hidden = !isScheme;
+    schemeNote.hidden = !isScheme;
+    schemeNote.textContent =
+      p.scheme === "cmyk"
+        ? "Medium Blue, Fluorescent Pink, Yellow, and Black standing in for C, M, Y, K. Editing a color switches back to Manual."
+        : "Ink 1 is the first color: change it and the others follow. Editing another ink, or adding or removing one, switches back to Manual.";
     includeBgControl.update(p.autoIncludeBackground);
     includeBgControl.element.hidden = !isAuto;
     autoNote.hidden = !isAuto;
@@ -180,7 +204,8 @@ export function createPaletteBlock(
       if (!shown) return;
       const color = p.inkColor[slot] ?? "#000000";
       if (row.swatch.value !== color) row.swatch.value = color;
-      row.swatch.title = color;
+      row.swatch.title = isScheme && slot === 0 && p.scheme !== "cmyk" ? `${color}: the scheme's first color` : color;
+      row.element.classList.toggle("scheme-first", isScheme && slot === 0 && p.scheme !== "cmyk");
       setField(row.hex, color);
       row.eyedropper.disabled = !hasImage;
       row.eyedropper.classList.toggle("active", sameTarget(active, { kind: "ink", slot }));

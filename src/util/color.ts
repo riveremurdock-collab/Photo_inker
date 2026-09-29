@@ -118,3 +118,62 @@ export function labToLinear(lab: Lab): LinearRgb {
 export function labToRgb(lab: Lab): RgbColor {
   return linearToRgb(labToLinear(lab));
 }
+
+// ---- Oklab / OKLCH (Björn Ottosson, public domain) ----
+// A perceptual space: equal steps in hue look like equal changes, and lightness
+// stays even when hue rotates. Used to build color schemes.
+
+export interface Oklch {
+  l: number; // 0..1
+  c: number; // chroma, ~0..0.37
+  h: number; // hue, degrees
+}
+
+export function linearToOklab(c: LinearRgb): { l: number; a: number; b: number } {
+  const l = Math.cbrt(0.4122214708 * c.r + 0.5363325363 * c.g + 0.0514459929 * c.b);
+  const m = Math.cbrt(0.2119034982 * c.r + 0.6806995451 * c.g + 0.1073969566 * c.b);
+  const s = Math.cbrt(0.0883024619 * c.r + 0.2817188376 * c.g + 0.6299787005 * c.b);
+  return {
+    l: 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    a: 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    b: 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+  };
+}
+
+export function oklabToLinear(lab: { l: number; a: number; b: number }): LinearRgb {
+  const l = (lab.l + 0.3963377774 * lab.a + 0.2158037573 * lab.b) ** 3;
+  const m = (lab.l - 0.1055613458 * lab.a - 0.0638541728 * lab.b) ** 3;
+  const s = (lab.l - 0.0894841775 * lab.a - 1.291485548 * lab.b) ** 3;
+  return {
+    r: 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    g: -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    b: -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  };
+}
+
+export function rgbToOklch(color: RgbColor): Oklch {
+  const lab = linearToOklab(rgbToLinear(color));
+  return { l: lab.l, c: Math.hypot(lab.a, lab.b), h: ((Math.atan2(lab.b, lab.a) * 180) / Math.PI + 360) % 360 };
+}
+
+/** OKLCH to sRGB, reducing chroma (keeping hue and lightness) until the color fits in sRGB. */
+export function oklchToRgb(color: Oklch): RgbColor {
+  const l = Math.min(1, Math.max(0, color.l));
+  const rad = (color.h * Math.PI) / 180;
+  const fits = (c: number) => {
+    const lin = oklabToLinear({ l, a: c * Math.cos(rad), b: c * Math.sin(rad) });
+    return lin.r >= -1e-4 && lin.g >= -1e-4 && lin.b >= -1e-4 && lin.r <= 1.0001 && lin.g <= 1.0001 && lin.b <= 1.0001;
+  };
+  let c = Math.max(0, color.c);
+  if (!fits(c)) {
+    let lo = 0;
+    let hi = c;
+    for (let i = 0; i < 24; i++) {
+      const mid = (lo + hi) / 2;
+      if (fits(mid)) lo = mid;
+      else hi = mid;
+    }
+    c = lo;
+  }
+  return linearToRgb(oklabToLinear({ l, a: c * Math.cos(rad), b: c * Math.sin(rad) }));
+}
