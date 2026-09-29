@@ -10,8 +10,8 @@
 | 3 | Rendering engine core | ✅ Done |
 | 4 | Image adjustments, color splitting (basic), shared layer options | ✅ Done |
 | 5 | Halftone (basic) | ✅ Done |
-| 6 | Export (basic) | ⏳ Next |
-| — | *End of basic build: overall report* | — |
+| 6 | Export (basic) | ✅ Done |
+| — | *End of basic build: overall report* | ✅ Given 2026-09-29 |
 | 7 | Full palette options | — |
 | 8 | Remaining color splitting methods | — |
 | 9 | Complete shared layer options | — |
@@ -151,6 +151,24 @@
 - **Ink Matching fixes found while testing:**
   - Compress mode now matches relative to the paper, so image white = bare paper. Before, a neutral white on warm paper got faint blue dots to "correct" the paper's tint.
   - The white entry of the lookup table is kept exactly as solved, so smoothing can't leak ink into it.
+
+### Step 6
+- **Exporter:** `export/exporter.ts` renders in 2048 px output tiles.
+  - For each tile, the pipeline's passes run on just that part of the image from the full-size source (`Pipeline.renderRegion`, shared with the zoom detail view), with a margin for smoothing and for halftone cells crossing the tile edge.
+  - An output pass then writes the tile.
+- **Digital:** PNG, streamed (with an sRGB chunk), or JPG (quality 0.92, via canvas, limited to 16384 px per side / 120 MP). It uses the same halftone GLSL as the preview, with 2×2 samples per pixel like the preview at 100%. Measured against the 100% preview: median ΔE 0.40.
+- **Print (Riso):**
+  - One 8-bit grayscale PNG per ink at the chosen DPI, with DPI written in pHYs. Named `Project_01_0078BF.png` in print order, zipped without recompression.
+  - Halftoned layers use 1 sample per pixel, so they are exactly 0/255. With halftone None they are smooth grayscale.
+  - Solo/mute are ignored (all inks are exported).
+- **PNG encoder:** `export/png.ts` is our own streaming encoder, using fflate's zlib. Rows are compressed as each strip of tiles finishes, so huge layers never exist uncompressed.
+- **New dependency:** `fflate` (MIT), for zlib and zip.
+- **Waiting:** export first waits for any ink matching or blue noise map in progress.
+- **Progress:** a progress bar and Cancel sit in the Export section; the UI stays responsive (it yields between tiles).
+- **Measured (Edge, software GPU):**
+  - Riso at A3 width (7020 × 4681, 4 inks): 10.5 s, JS heap ~120 MB.
+  - 6000 × 4000 image at 10 in / 600 DPI: 10.3 s.
+- **Panel:** can now place custom blocks after a section's generated controls.
 
 ## Open questions
 

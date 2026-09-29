@@ -1002,3 +1002,47 @@ input.swatch-input {
   flex-wrap: wrap;
   gap: 6px;
 }
+
+/* ---- Export ---- */
+
+.export-block {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--color-mint);
+}
+
+.export-summary {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-dark-grey);
+}
+
+.export-button {
+  justify-self: start;
+  padding: 8px 20px;
+  background: var(--color-olive);
+  border-color: var(--color-olive);
+  color: #fff;
+  font-weight: 700;
+}
+
+.export-button:hover:not(:disabled) {
+  background: var(--color-dark-grey);
+  border-color: var(--color-dark-grey);
+}
+
+.export-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.export-progress progress {
+  flex: 1;
+  accent-color: var(--color-dark-sandstone);
+}
+
+.export-message {
+  min-height: 1em;
+}

@@ -1,0 +1,90 @@
+// Export output passes. Each renders one tile of the output pixel grid from a
+// region render (coverage at some resolution over a known image-px area).
+//
+// Mode 0 (Digital): sRGB color. Halftoned tiles use 2×2 jittered samples per
+//   pixel, the same as the preview at 100%.
+// Mode 1 (Riso layers): one ink per channel, 255 = paper, 0 = ink. Halftoned
+//   tiles sample each pixel once, so layers are pure black and white.
+
+import { GLSL_INKS } from "../engine/gl/inkShader";
+import { GLSL_LINEAR_TO_SRGB, GLSL_SRGB_TO_LINEAR } from "../engine/gl/program";
+
+const HEADER = /* glsl */ `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uCoverage;  // region coverage (after layer options)
+uniform sampler2D uImage;     // region image, for transparency
+uniform vec2 uTileOrigin;     // output px of this tile's top-left corner
+uniform vec4 uRegion;         // image px covered by the region textures: x, y, w, h
+uniform float uOutScale;      // output px per image px
+uniform int uMode;            // 0 = digital color, 1 = riso layers
+out vec4 outColor;
+${GLSL_SRGB_TO_LINEAR}
+${GLSL_INKS}
+${GLSL_LINEAR_TO_SRGB}
+
+vec2 regionUv(vec2 outputPx) {
+  return clamp((outputPx / uOutScale - uRegion.xy) / uRegion.zw, vec2(0.0), vec2(1.0));
+}
+
+float htCoverage(int ink, vec2 p) {
+  vec2 uv = regionUv(p);
+  return textureLod(uCoverage, uv, 0.0)[ink] * textureLod(uImage, uv, 0.0).a;
+}
+`;
+
+/** Halftoned export: the halftone method's GLSL is inserted. */
+export function halftoneExportShader(methodGlsl: string): string {
+  return /* glsl */ `${HEADER}
+${methodGlsl}
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+
+int inkMask(vec2 p) {
+  int mask = 0;
+  for (int ink = 0; ink < 4; ink++) {
+    if (ink >= uInkCount) break;
+    if (htInk(ink, p, htCoverage(ink, htSamplePoint(ink, p))) > 0.5) mask |= (1 << ink);
+  }
+  return mask;
+}
+
+void main() {
+  vec2 p = uTileOrigin + gl_FragCoord.xy; // pixel center, output px (row 0 = top)
+  if (uMode == 1) {
+    int mask = inkMask(p);
+    vec4 gray = vec4(1.0);
+    for (int ink = 0; ink < 4; ink++) if ((mask & (1 << ink)) != 0) gray[ink] = 0.0;
+    outColor = gray;
+    return;
+  }
+  vec2 jitter = vec2(hash(p), hash(p + 17.31));
+  vec3 sum = vec3(0.0);
+  for (int j = 0; j < 2; j++) {
+    for (int i = 0; i < 2; i++) {
+      vec2 cell = vec2(float(i), float(j));
+      vec2 f = (cell + fract(jitter + cell * vec2(0.618034, 0.754878))) / 2.0 - 0.5;
+      sum += uTable[inkMask(p + f)];
+    }
+  }
+  outColor = vec4(linearToSrgb(gamutCompress(sum / 4.0)), 1.0);
+}
+`;
+}
+
+/** Halftone None: smooth coverage (layers) or the mixed color (digital). */
+export const SMOOTH_EXPORT = /* glsl */ `${HEADER}
+uniform sampler2D uMixed;     // region mixed color (sRGB texture: samples as linear)
+void main() {
+  vec2 p = uTileOrigin + gl_FragCoord.xy;
+  vec2 uv = regionUv(p);
+  if (uMode == 1) {
+    vec4 cov = textureLod(uCoverage, uv, 0.0) * textureLod(uImage, uv, 0.0).a;
+    vec4 gray = vec4(1.0);
+    for (int ink = 0; ink < 4; ink++) if (ink < uInkCount) gray[ink] = 1.0 - cov[ink];
+    outColor = gray;
+    return;
+  }
+  outColor = vec4(linearToSrgb(textureLod(uMixed, uv, 0.0).rgb), 1.0);
+}
+`;

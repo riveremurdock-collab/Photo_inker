@@ -195,6 +195,14 @@ This follows the outline's Rendering Engine section.
 - **Swappable model.** Rendering reads only the overlap table, so measured calibration (16 printed patches) can replace the spectral estimate later without changing the shader.
 - **Test view.** The temporary ink mixing test is `ui/inkTestView.ts`. It shows the swatch grid and ramps with Spectral, Multiply and Split modes, and is to be removed or hidden in Step 14.
 
+## 6b. Export (Step 6)
+
+- `export/exporter.ts` renders the output pixel grid in 2048 px tiles.
+  - For each tile, `Pipeline.renderRegion()` reruns copy → adjust → split → layer options for the matching image area (plus a margin), from the full-size source, at min(output, source) resolution. It is the same function the zoom detail view uses.
+  - An output pass (`export/shaders.ts`) then writes either Digital color (the halftone method's GLSL with 2×2 samples per pixel, like the preview at 100%) or Riso layers (one ink per channel, 1 sample per pixel, so pure black/white; smooth for None).
+- Strips of tiles stream into `export/png.ts` (our streaming PNG encoder, fflate zlib, pHYs DPI, sRGB chunk) or into a canvas for JPG. Riso PNGs are zipped with fflate.
+- File names: `Project.png` / `Project.jpg`; `Project_01_0078BF.png` … in print order, inside `Project_riso_layers.zip`.
+
 ## 7. Website embedding
 
 - `npm run build:site` builds into `../kawa_website/public/photo-inker-app/`, the same way the stipple tool builds into `stipple-app/`. The site can embed it with an iframe to `/photo-inker-app/index.html`, like `src/pages/stipple-tool.astro`.

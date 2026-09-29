@@ -15,6 +15,7 @@ import { Pipeline } from "./pipeline/pipeline";
 import { createLayersBlock } from "./ui/sections/layers";
 import { createToneMapBlock } from "./ui/sections/toneMap";
 import { createAmBlock } from "./ui/sections/halftone";
+import { createExportBlock } from "./ui/sections/export";
 
 const DEBUG = new URLSearchParams(location.search).has("debug");
 
@@ -161,6 +162,8 @@ function start(root: HTMLElement): void {
     splitToneMap: createToneMapBlock(settings, pipeline),
     layers: createLayersBlock(settings, palette),
     halftoneAm: createAmBlock(settings),
+  }, {
+    export: createExportBlock(settings, source, pipeline),
   });
 
   const main = document.createElement("main");

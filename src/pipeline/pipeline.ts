@@ -79,6 +79,12 @@ interface PassTargets {
   mixed: Target | null;
 }
 
+/** How far (output px) a halftone may look from a pixel for its coverage: 1.5 × the largest cell or dot. */
+function halftoneReach(values: Record<string, unknown>): number {
+  const sizes = [values.cellSize, values.dotSize].flatMap((v) => (Array.isArray(v) ? (v as number[]) : []));
+  return Math.max(4, ...sizes) * 1.5;
+}
+
 const emptyTargets = (): PassTargets => ({ adjusted: null, smoothA: null, smoothB: null, coverage: null, layered: null, mixed: null });
 
 /** Everything the split/layer/mix passes need, captured by the last whole-image run (reused by detail renders). */
@@ -118,15 +124,15 @@ export class Pipeline {
   private preparedCount = 0;
 
   private compositor: Compositor;
-  private detailTargets: PassTargets = emptyTargets();
-  private detailSource: Target | null = null;
+  private detailTargets: RegionTargets = emptyRegionTargets();
+  private halftoneState: ExportState["halftone"] = null;
   private detail: DetailTexture | null = null;
   private halftoned = false;
 
   private frameRequested = false;
   private histogramListeners = new Set<HistogramListener>();
   private busyListeners = new Set<BusyListener>();
-  private busy = new Map<string, string>();
+  private busyMessages = new Map<string, string>();
   private lastHistogram: { data: Uint32Array; source: string } | null = null;
 
   constructor(private host: PipelineHost) {
@@ -422,9 +428,9 @@ export class Pipeline {
   }
 
   private setBusy(id: string, message: string | null): void {
-    if (message) this.busy.set(id, message);
-    else this.busy.delete(id);
-    const text = [...this.busy.values()].join(" · ") || null;
+    if (message) this.busyMessages.set(id, message);
+    else this.busyMessages.delete(id);
+    const text = [...this.busyMessages.values()].join(" · ") || null;
     for (const l of this.busyListeners) l(text);
   }
 
@@ -506,6 +512,7 @@ export class Pipeline {
     if (!method) {
       return this.stage("halftone", `none|${this.version("mix")}`, () => {
         this.halftoned = false;
+        this.halftoneState = null;
         this.showMixed();
       });
     }
@@ -538,9 +545,11 @@ export class Pipeline {
     return this.stage("halftone", key, () => {
       this.halftoned = true;
       this.clearDetail();
+      const methodUniforms = method.uniforms(values, ctx, prepared as never);
+      this.halftoneState = { method, methodUniforms, reach: halftoneReach(values) };
       this.compositor.set({
         method,
-        methodUniforms: method.uniforms(values, ctx, prepared as never),
+        methodUniforms,
         inkUniforms: this.inputs!.inkUniforms,
         coverage: this.main.layered!,
         image: this.working!,
@@ -585,13 +594,7 @@ export class Pipeline {
   private clearDetail(): void {
     if (!this.detail) return;
     this.detail = null;
-    for (const key of Object.keys(this.detailTargets) as (keyof PassTargets)[]) {
-      const t = this.detailTargets[key];
-      if (t) this.gpu.deleteTarget(t);
-      this.detailTargets[key] = null;
-    }
-    if (this.detailSource) this.gpu.deleteTarget(this.detailSource);
-    this.detailSource = null;
+    this.releaseTargets(this.detailTargets);
     if (!this.halftoned) this.showMixed();
   }
 
@@ -633,23 +636,106 @@ export class Pipeline {
     const rh = y1 - y0;
     let texelScale = Math.min(view.scale, sourceScale);
     if (rw * rh * texelScale * texelScale > MAX_DETAIL_PIXELS) texelScale = Math.sqrt(MAX_DETAIL_PIXELS / (rw * rh));
-    const w = Math.max(1, Math.round(rw * texelScale));
-    const h = Math.max(1, Math.round(rh * texelScale));
 
-    this.detailSource = this.gpu.ensureTarget(this.detailSource, w, h, "image");
-    this.gpu.pass(COPY, this.detailSource, {
-      uImage: { texture: this.sourceTexture },
-      uRatio: [(this.sourceTextureWidth * (rw / W)) / w, (this.sourceTextureWidth * (H / W) * (rh / H)) / h],
-      uRegion: [x0 / W, y0 / H, rw / W, rh / H],
+    const out = this.renderRegion({ x: x0, y: y0, width: rw, height: rh }, texelScale, this.detailTargets, {
+      mix: true,
+      visible: inputs.visible,
+    });
+    this.detail = { texture: out.mixed!.texture, x: x0, y: y0, width: rw, height: rh };
+    this.showMixed();
+    if (this.host.debug) {
+      console.debug(`[pipeline] detail ${out.layered.width}×${out.layered.height} ${(performance.now() - t0).toFixed(1)}ms`);
+    }
+  }
+
+  // ---- regions: the same passes for part of the image at any resolution (detail view, export tiles) ----
+
+  /**
+   * Runs copy → adjust → split → layer options (→ mix) for one region of the
+   * image (image px), from the full-size source, at `texelScale` texels per
+   * image px. Uses the settings of the last whole-image run.
+   */
+  renderRegion(
+    region: { x: number; y: number; width: number; height: number },
+    texelScale: number,
+    t: RegionTargets,
+    options: { mix: boolean; visible?: number[] },
+  ): { source: Target; layered: Target; mixed: Target | null } {
+    const image = this.host.source.get()!;
+    const inputs = this.inputs!;
+    const W = image.width;
+    const H = image.height;
+    const w = Math.max(1, Math.round(region.width * texelScale));
+    const h = Math.max(1, Math.round(region.height * texelScale));
+    t.source = this.gpu.ensureTarget(t.source, w, h, "image");
+    this.gpu.pass(COPY, t.source, {
+      uImage: { texture: this.sourceTexture! },
+      uRatio: [(this.sourceTextureWidth * (region.width / W)) / w, (this.sourceTextureWidth * (H / W) * (region.height / H)) / h],
+      uRegion: [region.x / W, region.y / H, region.width / W, region.height / H],
       uSize: [w, h],
     });
-    const t = this.detailTargets;
-    const adjusted = this.adjustPasses(a, this.detailSource, t, sigmaImage * (w / rw));
+    const a = inputs.adjust;
+    const sigmaImage = (a.smoothing * Math.max(W, H)) / 1000;
+    const adjusted = this.adjustPasses(a, t.source, t, sigmaImage * (w / region.width));
     const coverage = this.splitPass(inputs, adjusted, t);
     const layered = this.layersPass(inputs.layerUniforms, coverage, t);
-    const mixed = this.mixPass(inputs.inkUniforms, inputs.visible, layered, this.detailSource, t);
-    this.detail = { texture: mixed.texture, x: x0, y: y0, width: rw, height: rh };
-    this.showMixed();
-    if (this.host.debug) console.debug(`[pipeline] detail ${w}×${h} ${(performance.now() - t0).toFixed(1)}ms`);
+    const visible = options.visible ?? [1, 1, 1, 1];
+    const mixed = options.mix ? this.mixPass(inputs.inkUniforms, visible, layered, t.source, t) : null;
+    return { source: t.source, layered, mixed };
   }
+
+  /** Frees a set of region targets. */
+  releaseTargets(t: RegionTargets): void {
+    for (const key of Object.keys(t) as (keyof RegionTargets)[]) {
+      const target = t[key];
+      if (target) this.gpu.deleteTarget(target);
+      t[key] = null;
+    }
+  }
+
+  /** True while ink matching or a halftone map is still being prepared. */
+  get busy(): boolean {
+    return this.busyMessages.size > 0 || this.preparing !== null || this.halftonePreparing !== null;
+  }
+
+  /** What an export needs from the current state, or null if nothing is loaded yet. */
+  exportState(): ExportState | null {
+    const image = this.host.source.get();
+    if (!image || !this.inputs || !this.sourceTexture) return null;
+    return {
+      gpu: this.gpu,
+      imageWidth: image.width,
+      imageHeight: image.height,
+      sourceScale: this.sourceTextureWidth / image.width,
+      inkCount: this.inputs.ctx.inkCount,
+      inkUniforms: this.inputs.inkUniforms,
+      smoothing: this.inputs.adjust.smoothing,
+      halftone: this.halftoneState,
+    };
+  }
+
+  /** Runs any pending pipeline work now (instead of on the next frame). */
+  flush(): void {
+    this.run();
+  }
+}
+
+/** Region render targets: the pass targets plus the copied source region. */
+export type RegionTargets = PassTargets & { source: Target | null };
+
+export function emptyRegionTargets(): RegionTargets {
+  return { ...emptyTargets(), source: null };
+}
+
+export interface ExportState {
+  gpu: Gpu;
+  imageWidth: number;
+  imageHeight: number;
+  /** Full-size source texels per image px (below 1 only for images over 8192 px). */
+  sourceScale: number;
+  inkCount: number;
+  inkUniforms: Record<string, UniformValue>;
+  smoothing: number;
+  /** Null for halftone None. reach = how far (output px) the halftone looks for coverage. */
+  halftone: { method: HalftoneMethod; methodUniforms: Record<string, UniformValue>; reach: number } | null;
 }

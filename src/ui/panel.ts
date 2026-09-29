@@ -38,6 +38,8 @@ export class Panel {
   constructor(
     private store: SettingsStore,
     customBlocks: Partial<Record<SectionId, HTMLElement>> = {},
+    /** Custom blocks placed after a section's generated controls. */
+    afterBlocks: Partial<Record<SectionId, HTMLElement>> = {},
   ) {
     this.element = document.createElement("aside");
     this.element.className = "panel";
@@ -63,6 +65,8 @@ export class Panel {
         const custom = customBlocks[section.id as SectionId];
         if (custom) sub.append(custom);
         this.addControls(section, sub);
+        const subAfter = afterBlocks[section.id as SectionId];
+        if (subAfter) sub.append(subAfter);
         parentBody.append(sub);
         this.subSections.push({ section, element: sub });
         continue;
@@ -85,6 +89,8 @@ export class Panel {
       const custom = customBlocks[section.id as SectionId];
       if (custom) body.append(custom);
       this.addControls(section, body);
+      const after = afterBlocks[section.id as SectionId];
+      if (after) body.append(after);
 
       const note = COMING_IN[section.id as SectionId];
       if (note && section.settings.length === 0 && !custom) {
