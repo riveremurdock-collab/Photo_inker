@@ -104,9 +104,11 @@ export class ViewRenderer {
       return;
     }
 
-    // Crisp pixels once each texel covers 2+ screen pixels, smooth below that.
-    const texelScale = (view.scale * imageWidth) / this.source.textureWidth;
-    const wantNearest = texelScale >= 2;
+    // Crisp pixels only when zoomed past 200% of real image pixels, and only if
+    // the texture has every image pixel (otherwise upscaling it blocky would
+    // just show processing resolution, not the image).
+    const fullResolution = this.source.textureWidth >= imageWidth;
+    const wantNearest = fullResolution && view.scale >= 2;
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.source.texture);
     if (wantNearest !== (this.magNearest.get(this.source.texture) ?? false)) {

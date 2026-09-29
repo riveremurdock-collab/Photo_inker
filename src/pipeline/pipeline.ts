@@ -30,9 +30,13 @@ import { ADJUST, COPY, LAYERS, LIGHTNESS, MIX, SMOOTH } from "./stages/shaders";
 
 /** Longest texture edge used for the original image on the GPU. */
 const SOURCE_TEXTURE_CAP = 8192;
-/** Preview processing resolution (long edge), chosen from the preview area size. */
-const MIN_WORKING_EDGE = 1024;
-const MAX_WORKING_EDGE = 2560;
+/**
+ * Longest edge the preview is processed at. Images up to this size are
+ * processed at full resolution; larger ones are downscaled once with an area
+ * filter. Displayed through mipmaps, the inked view is as sharp as the
+ * original at any zoom up to this resolution.
+ */
+const MAX_WORKING_EDGE = 4096;
 const HISTOGRAM_SIZE = 256;
 
 export interface PipelineHost {
@@ -143,12 +147,10 @@ export class Pipeline {
     }
   }
 
-  // ---- upload: original image → GPU, plus a preview-resolution working copy ----
+  // ---- upload: original image → GPU, plus the working copy the pipeline processes ----
 
   private workingEdge(): number {
-    const rect = this.host.preview.element.getBoundingClientRect();
-    const edge = Math.ceil(Math.max(rect.width, rect.height) * (window.devicePixelRatio || 1));
-    return Math.min(MAX_WORKING_EDGE, Math.max(MIN_WORKING_EDGE, edge));
+    return Math.min(MAX_WORKING_EDGE, this.gpu.maxTextureSize);
   }
 
   private runUpload(bitmap: ImageBitmap, imageVersion: number): boolean {
@@ -187,7 +189,11 @@ export class Pipeline {
       const w = Math.max(1, Math.round(bitmap.width * k));
       const h = Math.max(1, Math.round(bitmap.height * k));
       this.working = this.gpu.ensureTarget(this.working, w, h, "image");
-      this.gpu.pass(COPY, this.working, { uImage: { texture: tex }, uSize: [w, h] });
+      this.gpu.pass(COPY, this.working, {
+        uImage: { texture: tex },
+        uRatio: [upload.width / w, upload.height / h],
+        uSize: [w, h],
+      });
     });
   }
 
@@ -215,6 +221,12 @@ export class Pipeline {
         this.gpu.pass(SMOOTH, this.smoothA, { ...common, uImage: { texture: this.adjusted.texture }, uDir: [1, 0] });
         this.gpu.pass(SMOOTH, this.smoothB, { ...common, uImage: { texture: this.smoothA.texture }, uDir: [0, 1] });
         this.adjustOutput = this.smoothB;
+      } else {
+        // Free the smoothing buffers while smoothing is off.
+        if (this.smoothA) this.gpu.deleteTarget(this.smoothA);
+        if (this.smoothB) this.gpu.deleteTarget(this.smoothB);
+        this.smoothA = null;
+        this.smoothB = null;
       }
     });
   }

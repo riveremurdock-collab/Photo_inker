@@ -11,11 +11,32 @@ uniform vec2 uSize;
 out vec4 outColor;
 `;
 
-/** Copies/downscales an image. The source has mipmaps, so a smaller target averages in linear light. */
+/**
+ * Copies or downscales an image with an area (box) filter: each output pixel
+ * averages a 4×4 grid of samples over its footprint in the source, in linear
+ * light. Sharper than a plain mipmap blend for non-power-of-two ratios.
+ */
 export const COPY = /* glsl */ `${HEADER}
 uniform sampler2D uImage;
+uniform vec2 uRatio;   // source texels per output pixel (x, y); 1 = same size
 void main() {
-  outColor = texture(uImage, gl_FragCoord.xy / uSize);
+  vec2 uv = gl_FragCoord.xy / uSize;
+  if (uRatio.x <= 1.0 && uRatio.y <= 1.0) {
+    outColor = textureLod(uImage, uv, 0.0);
+    return;
+  }
+  // Each of the 4×4 taps covers ratio/4 source texels; a small LOD keeps every tap
+  // averaging its own share of the footprint instead of skipping texels.
+  float lod = max(0.0, log2(max(uRatio.x, uRatio.y) / 4.0));
+  vec2 tapStep = 1.0 / uSize / 4.0;
+  vec4 sum = vec4(0.0);
+  for (int j = 0; j < 4; j++) {
+    for (int i = 0; i < 4; i++) {
+      vec2 offset = (vec2(float(i), float(j)) - 1.5) * tapStep;
+      sum += textureLod(uImage, uv + offset, lod);
+    }
+  }
+  outColor = sum / 16.0;
 }
 `;
 

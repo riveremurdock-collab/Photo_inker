@@ -99,7 +99,12 @@
 
 ### Step 4
 - **Pipeline:** upload → adjust → (histogram, only for Tone Map) → split → layerOptions → mix. All stages are GPU passes, cached per stage (ARCHITECTURE §5).
-- **Working resolution:** preview processing is at screen resolution (long edge 1024–2560 px). Above 100% zoom the preview is upscaled until Step 5 adds full-resolution rendering.
+- **Working resolution:** changed after the user reported a blurry inked view.
+  - The pipeline processes at full image resolution, up to 4096 px on the long edge. Larger images are downscaled once with a 4×4 area filter.
+  - The inked view is displayed through mipmaps like the original.
+  - Measured sharpness (edge energy relative to the original): at fit 0.78 → 1.00; a 3000 px image at 100% → 0.98. Images over 4096 px are softer than the original above ~70% zoom until Step 5 adds full-resolution rendering of the visible area.
+- **Crisp pixels:** nearest-neighbor display is used only at 200%+ zoom and only for full-resolution textures.
+- **Smoothing buffers:** freed while smoothing is off.
 - **Display toggle:** Inks / Original buttons in the preview toolbar (keys I / O).
 - **Image Adjustments:**
   - Levels (black point, white point, midtone as a gamma: `2^(value/50)`) and the contrast curve are applied per channel to sRGB values, like an image editor, as one 256-entry table.

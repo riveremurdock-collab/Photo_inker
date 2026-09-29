@@ -154,7 +154,7 @@ upload → fadeBorder → adjust → split → layerOptions → halftone → bor
   - Coverage is one `RGBA8` texture with one ink per channel.
   - The mixed output is an `SRGB8_ALPHA8` texture with mipmaps, so zoomed-out display averages in linear light.
 - **Resolution.**
-  - The preview runs the pipeline on a working copy, long edge = preview size × devicePixelRatio, clamped to 1024–2560 px. The copy is made by rendering from the mipmapped full-size texture (a linear-light downscale).
+  - The pipeline runs on a working copy at full image resolution, capped at 4096 px on the long edge. Larger images are downscaled once with a 4×4 area filter in linear light. The mixed output is shown through mipmaps, so at any zoom the inked view is as sharp as the original, up to that resolution.
   - The "Original" view shows the full-size texture (up to 8192 px).
   - Full-resolution processing at 100%+ zoom and for export comes with halftoning (Step 5) and export (Step 6).
   - Full-resolution export processes **tiles** with an overlap margin wide enough for kernel stages (smoothing, trapping, blur). Whole-image algorithms that can't tile, such as error diffusion, run in a worker on the full coverage map, stored as 8-bit to save memory.
