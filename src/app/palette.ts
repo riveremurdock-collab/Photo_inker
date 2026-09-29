@@ -4,7 +4,6 @@
 
 import { MAX_INKS } from "../pipeline/coverage";
 import { autoPalette } from "./autoPalette";
-import { inkNameFor } from "./inkLibrary";
 import type { SourceStore } from "./source";
 import type { SettingsStore } from "./store";
 
@@ -44,17 +43,6 @@ export class PaletteActions {
   setInkColor(slot: number, hex: string, commit = true): void {
     this.leaveAuto();
     this.store.setInkValue("palette", "inkColor", slot, hex, { commit });
-    if (!this.palette.inkNameEdited[slot]) {
-      this.store.setInkValue("palette", "inkName", slot, inkNameFor(hex), { commit });
-    }
-  }
-
-  /** Typing a name keeps it; clearing the name goes back to automatic naming. */
-  setInkName(slot: number, name: string, commit = true): void {
-    const edited = name.trim() !== "";
-    this.store.setInkValue("palette", "inkNameEdited", slot, edited, { commit });
-    const value = edited ? name : inkNameFor(this.palette.inkColor[slot] ?? "#000000");
-    this.store.setInkValue("palette", "inkName", slot, value, { commit });
   }
 
   setPaper(hex: string, commit = true): void {
@@ -70,7 +58,6 @@ export class PaletteActions {
     const color = NEW_INK_COLORS.find((c) => !used.has(c)) ?? "#000000";
     this.store.resetInkSlot(count);
     this.store.setInkValue("palette", "inkColor", count, color);
-    this.store.setInkValue("palette", "inkName", count, inkNameFor(color));
     this.store.set("palette", "inkCount", count + 1);
   }
 
@@ -98,17 +85,12 @@ export class PaletteActions {
   runAuto(): void {
     const image = this.source.get();
     if (!image) return;
-    const { inkCount, autoIncludeBackground, paper, inkNameEdited } = this.palette;
+    const { inkCount, autoIncludeBackground, paper } = this.palette;
     const result = autoPalette(image.bitmap, inkCount, autoIncludeBackground ? null : paper);
 
     const colors = this.palette.inkColor.slice();
-    const names = this.palette.inkName.slice();
-    result.inks.forEach((hex, i) => {
-      colors[i] = hex;
-      if (!inkNameEdited[i]) names[i] = inkNameFor(hex);
-    });
+    result.inks.forEach((hex, i) => (colors[i] = hex));
     this.store.setValue("palette", "inkColor", colors);
-    this.store.setValue("palette", "inkName", names);
     if (autoIncludeBackground) this.store.set("palette", "paper", result.paper);
   }
 }

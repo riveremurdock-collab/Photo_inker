@@ -1,9 +1,9 @@
 // Palette section: Manual/Auto switch, the ink list (top to bottom = print
 // order), and the paper/background color. Each ink row has a swatch (opens the
-// color picker and hex field), a name, a hex field, an eyedropper, reorder buttons, and
-// a remove button.
+// browser color picker directly), a hex field, an eyedropper, reorder buttons,
+// and a remove button. Inks are identified by their hex code.
 
-import { PAPER_PRESETS } from "../../app/inkLibrary";
+import { PAPER_PRESETS } from "../../app/paperPresets";
 import type { PaletteActions } from "../../app/palette";
 import type { SourceStore } from "../../app/source";
 import type { SettingsStore } from "../../app/store";
@@ -18,8 +18,7 @@ const EYEDROPPER_ICON = `<svg viewBox="0 0 24 24" width="16" height="16" aria-hi
 interface InkRow {
   element: HTMLElement;
   order: HTMLElement;
-  swatch: HTMLButtonElement;
-  name: HTMLInputElement;
+  swatch: HTMLInputElement;
   hex: HTMLInputElement;
   eyedropper: HTMLButtonElement;
   up: HTMLButtonElement;
@@ -93,28 +92,14 @@ export function createPaletteBlock(
     order.className = "ink-order";
     order.textContent = String(slot + 1);
 
-    const swatch = document.createElement("button");
-    swatch.type = "button";
-    swatch.className = "swatch";
+    // The swatch is the browser color input itself, so clicking it opens the
+    // color picker (with manual RGB/hex entry) straight away.
+    const swatch = document.createElement("input");
+    swatch.type = "color";
+    swatch.className = "swatch swatch-input";
     swatch.setAttribute("aria-label", `Ink ${slot + 1} color`);
-    swatch.addEventListener("click", () =>
-      openSwatchPopover({
-        anchor: swatch,
-        title: "Ink color",
-        presets: [], // Riso ink approximations will be added here later
-        current: store.get().palette.inkColor[slot] ?? "#000000",
-        onPick: (hex, commit) => actions.setInkColor(slot, hex, commit),
-      }),
-    );
-
-    const name = document.createElement("input");
-    name.type = "text";
-    name.className = "ink-name";
-    name.maxLength = 40;
-    name.setAttribute("aria-label", `Ink ${slot + 1} name`);
-    name.addEventListener("input", () => actions.setInkName(slot, name.value, false));
-    name.addEventListener("change", () => actions.setInkName(slot, name.value, true));
-    name.addEventListener("blur", () => (name.value = name.dataset.value ?? name.value));
+    swatch.addEventListener("input", () => actions.setInkColor(slot, swatch.value, false));
+    swatch.addEventListener("change", () => actions.setInkColor(slot, swatch.value, true));
 
     const hex = hexField(`Ink ${slot + 1} hex code`, (v) => actions.setInkColor(slot, v));
     const target: PickTarget = { kind: "ink", slot };
@@ -132,9 +117,9 @@ export function createPaletteBlock(
     const remove = iconButton(`Remove ink ${slot + 1}`, "×", "remove");
     remove.addEventListener("click", () => actions.removeInk(slot));
 
-    li.append(order, swatch, name, hex, eye, move, remove);
+    li.append(order, swatch, hex, eye, move, remove);
     list.append(li);
-    rows.push({ element: li, order, swatch, name, hex, eyedropper: eye, up, down, remove });
+    rows.push({ element: li, order, swatch, hex, eyedropper: eye, up, down, remove });
   }
 
   const addButton = document.createElement("button");
@@ -194,9 +179,8 @@ export function createPaletteBlock(
       row.element.hidden = !shown;
       if (!shown) return;
       const color = p.inkColor[slot] ?? "#000000";
-      row.swatch.style.setProperty("--swatch", color);
-      row.swatch.title = `${p.inkName[slot]} ${color}`;
-      setField(row.name, p.inkName[slot] ?? "");
+      if (row.swatch.value !== color) row.swatch.value = color;
+      row.swatch.title = color;
       setField(row.hex, color);
       row.eyedropper.disabled = !hasImage;
       row.eyedropper.classList.toggle("active", sameTarget(active, { kind: "ink", slot }));

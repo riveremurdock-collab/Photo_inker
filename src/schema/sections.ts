@@ -82,27 +82,6 @@ export const paletteSection = defineSection({
       hidden: true,
     },
     {
-      kind: "text",
-      key: "inkName",
-      label: "Ink name",
-      perInk: true,
-      default: "Ink",
-      slotDefaults: ["Blue", "Fluorescent Pink", "Yellow", "Black"],
-      maxLength: 40,
-      hidden: true,
-      stage: null,
-    },
-    {
-      // True once the user types a name, so later color changes stop renaming the ink.
-      kind: "toggle",
-      key: "inkNameEdited",
-      label: "Ink name edited",
-      perInk: true,
-      default: false,
-      hidden: true,
-      stage: null,
-    },
-    {
       kind: "color",
       key: "paper",
       label: "Paper",

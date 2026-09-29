@@ -573,13 +573,39 @@ body[data-mode="print"] .mode-badge {
   border-color: var(--color-black-grey);
 }
 
-.ink-name {
-  flex: 1;
-  width: 0;
-  min-width: 50px;
+/* Ink swatches are native color inputs, styled to look like the swatch buttons. */
+input.swatch-input {
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgb(0 0 0 / 0.25);
+  border-radius: 6px;
+  background: none;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
 }
 
-.ink-row .control-hex,
+.swatch-input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.swatch-input::-webkit-color-swatch {
+  border: none;
+  border-radius: 5px;
+}
+
+.swatch-input::-moz-color-swatch {
+  border: none;
+  border-radius: 5px;
+}
+
+.ink-row .control-hex {
+  flex: 1;
+  width: 0;
+  min-width: 74px;
+}
+
 .paper-row .control-hex {
   width: 74px;
 }

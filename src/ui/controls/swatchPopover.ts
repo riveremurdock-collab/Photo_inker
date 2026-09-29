@@ -1,7 +1,7 @@
 // Popover opened from a color swatch: an optional grid of named presets plus
 // a color picker and hex field. Only one popover is open at a time.
 
-import type { NamedColor } from "../../app/inkLibrary";
+import type { NamedColor } from "../../app/paperPresets";
 
 export interface SwatchPopoverOptions {
   anchor: HTMLElement;

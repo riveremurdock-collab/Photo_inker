@@ -108,8 +108,8 @@ export class Panel {
       def,
       element,
       update(settings) {
-        const { inkCount, inkName, inkColor } = settings.palette;
-        const nextSignature = `${inkCount}|${inkName.join("|")}|${inkColor.join("|")}`;
+        const { inkCount, inkColor } = settings.palette;
+        const nextSignature = `${inkCount}|${inkColor.join("|")}`;
         const values = store.getValue(sectionId, def.key) as unknown[];
         if (nextSignature !== signature) {
           signature = nextSignature;
@@ -120,7 +120,7 @@ export class Panel {
               { ...def, help: undefined },
               values[slot],
               (value, commit) => store.setInkValue(sectionId, def.key, slot, value, { commit }),
-              inkName[slot],
+              (inkColor[slot] ?? "").toUpperCase(),
             );
             const labelEl = control.element.querySelector(".control-label");
             const dot = document.createElement("span");

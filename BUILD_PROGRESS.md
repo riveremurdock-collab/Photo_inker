@@ -60,10 +60,9 @@
   - **Remove:** a removed ink's settings go to the unused end slot.
   - **Add:** a new ink's slot is reset to defaults and given the first standard color not already used.
 - **Defaults:** 3 inks (Blue #0078bf, Fluorescent Pink #ff48b0, Yellow #ffe800) on Natural paper (#f6f3ec). This is a riso CMY analog, so a color photo looks reasonable right away once splitting exists.
-- **Ink names:** used for export file names.
-  - They follow the color automatically: the matching Riso ink within ΔE 6, otherwise a plain hue name such as "Orange".
-  - Once the user types a name, it stays. Clearing it goes back to automatic naming.
-- **Presets:** the ink color popup has only a color picker and hex field (Riso ink approximations will be added later, per request). The paper popup keeps 7 paper presets. The 31-ink list in `app/inkLibrary.ts` is still used only to name inks.
+- **Ink identity:** inks have no names; they are identified by their hex code. This was requested: Riso ink approximations and names will come later. Export file names will use the hex code, e.g. `Project_01_0078BF.png`.
+- **Choosing an ink color:** an ink's swatch is the browser's own color input, so clicking it opens the color picker (with manual RGB/hex entry) straight away. Each row also has a hex field.
+- **Presets:** there are no ink presets for now. The paper swatch opens a popup with 7 paper presets plus a custom picker (`app/paperPresets.ts`).
 - **Manual vs Auto:**
   - Palette colors are either Manual or Auto.
   - Auto recomputes on upload, ink count change, and the background toggle, plus paper change when the paper is kept.
@@ -81,7 +80,7 @@
 - **Reorder controls:** ▲/▼ buttons, not drag-and-drop. They are simpler and keyboard accessible.
 - **Paper label:** the paper row reads "Background" in Digital mode and "Paper" in Print mode.
 - **Transparent PNGs:** transparent areas show the paper color.
-- **Panel width:** widened to 370 px so ink names fit.
+- **Panel width:** widened to 370 px.
 
 ## Open questions
 

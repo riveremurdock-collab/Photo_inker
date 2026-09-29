@@ -197,7 +197,7 @@ Code is copied in, never linked, and each file notes where it came from.
 | `ui/preview.ts` zoom/pan math | preview canvas (rewritten for WebGL + devicePixelRatio) | Step 1 |
 | `panel.ts` `<details>` sections, slider row (preview/commit) | control builders | Step 1 |
 | `ui/imageLoad.ts`, upload drop zone, `crop.ts` downscale | upload stage (adds max size, multi-step downscale) | Step 1 |
-| `ui/risoPresets.ts` | `app/inkLibrary.ts` (extended to 31 inks + paper presets, auto naming) | Step 2 |
+| `ui/risoPresets.ts` | not used for now (ink presets deferred at user request); paper presets are in `app/paperPresets.ts` | Step 2 |
 | `separation/neugebauer.ts` `solveCoverage`, `lut.ts` | starting point for Ink Matching (rewritten on spectral model) | Step 4 |
 | `engine/grain.ts` min dot constant | min dot size default | Step 5 |
 | `output/sizeUnits.ts`, `downloadBlob` | export sizing | Step 6 |
