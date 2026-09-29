@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:site": "tsc -b && vite build --outDir ../kawa_website/public/photo-inker-app --emptyOutDir",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit"
   },

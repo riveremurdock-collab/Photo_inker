@@ -57,15 +57,19 @@ All app settings live in one typed **`ProjectSettings`** object held by `app/sto
 
 | Field | Meaning |
 |---|---|
-| `kind` | `number`, `select`, `toggle`, `color`, `seed`, `curve` (more kinds added only when needed) |
+| `kind` | `number`, `select`, `toggle`, `color`, `text`, `seed`, `curve` (more kinds added only when needed) |
 | `key`, `label`, `help` | identity and UI text |
 | `default` | the value used on a fresh project; every setting has one |
 | `min`/`max`/`step`/`unit` or `options` | range or choices |
-| `perInk` | stored as an array indexed by ink slot (length = ink count) |
+| `perInk` | stored as an array indexed by ink slot (always length `MAX_INKS` = 4, so adding or removing inks never loses values) |
+| `stage` | overrides the section's stage; `null` = never affects the preview (export-only or UI-only) |
+| `visibleWhen` | shown only when a predicate over the section's values is true (e.g. JPG quality only for JPG) |
+| `display` | selects only: `segmented` buttons or `dropdown` |
 | `modes` | show only in `digital` or `print` mode |
 | `advanced` | hidden behind the section's Basic/Advanced toggle (Step 14) |
 
-- **Sections.** Settings are grouped into `SectionSchema { id, title, stage, settings, modes? }`. `stage` is the pipeline stage that reruns when anything in the section changes.
+- **Sections.** Settings are grouped into `SectionSchema { id, title, stage, settings }`, declared with `defineSection()` in `src/schema/sections.ts`. `stage` is the pipeline stage that reruns when anything in the section changes (unless a setting overrides it).
+- **Derived type.** `ProjectSettings` is derived from the schema by TypeScript (literal keys and option values), so `settings.upload.mode` is typed `"digital" | "print"` without a hand-written interface.
 - **Plugin settings.** A splitting method or halftone type brings its own `schema`. The section shows the chosen plugin's controls, and its values are stored under `settings.split.methods[methodId]` / `settings.halftone.types[typeId]`, so switching methods keeps each method's settings.
 - **Generated UI.** Controls are generated from the schema. Sections with special UI (palette list, histogram band handles, curve editors) add a custom builder, but their values still live in the settings object and are still described by `SettingDef`s.
 - **Walking the schema.** Presets, save/load, and randomize (later) only walk the schema.
@@ -165,7 +169,12 @@ This follows the outline's Rendering Engine section.
   - The final conversion is linear → sRGB with soft-knee gamut compression instead of a hard clip.
 - **Swappable model.** Rendering reads only the overlap table and the shader's ink model, so measured calibration can replace the spectral estimate later.
 
-## 7. Workers
+## 7. Website embedding
+
+- `npm run build:site` builds into `../kawa_website/public/photo-inker-app/`, the same way the stipple tool builds into `stipple-app/`. The site can embed it with an iframe to `/photo-inker-app/index.html`, like `src/pages/stipple-tool.astro`.
+- Fonts (`/fonts/...`) and the favicon (`/images/logos/...`) are the site's own files. In `npm run dev`, a small Vite plugin serves them from `../kawa_website/public` so local looks the same as the site.
+
+## 8. Workers
 
 - **Protocol.** `workers/protocol.ts` defines one envelope for all workers: `{ requestId, payload }` in and `progress | done | error` out.
 - **Client.** `workers/workerClient.ts` is a generalized copy of the stipple tool's client.
@@ -173,7 +182,7 @@ This follows the outline's Rendering Engine section.
   - Large buffers are sent as transferables.
 - **Yielding.** Long worker loops call `yieldToEventLoop()` (`workers/yield.ts`, a MessageChannel trick from the stipple tool) between chunks, so a newer request can cancel them.
 
-## 8. Code reused from the stipple tool
+## 9. Code reused from the stipple tool
 
 Code is copied in, never linked, and each file notes where it came from.
 
