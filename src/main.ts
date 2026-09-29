@@ -11,6 +11,9 @@ import { PaletteActions } from "./app/palette";
 import { Eyedropper } from "./ui/preview/eyedropper";
 import { createPaletteBlock } from "./ui/sections/palette";
 import { InkTestView } from "./ui/inkTestView";
+import { Pipeline } from "./pipeline/pipeline";
+import { createLayersBlock } from "./ui/sections/layers";
+import { createToneMapBlock } from "./ui/sections/toneMap";
 
 const DEBUG = new URLSearchParams(location.search).has("debug");
 
@@ -80,9 +83,12 @@ function start(root: HTMLElement): void {
   const status = document.createElement("footer");
   status.className = "status";
   let zoomPercent = 100;
+  let busyMessage: string | null = null;
   function updateStatus(): void {
     const image = source.get();
-    status.textContent = image ? `${image.width} × ${image.height} px · ${zoomPercent}%` : "No image loaded";
+    const parts = image ? [`${image.width} × ${image.height} px`, `${zoomPercent}%`] : ["No image loaded"];
+    if (busyMessage) parts.push(busyMessage);
+    status.textContent = parts.join(" · ");
   }
 
   // ---- Preview ----
@@ -137,8 +143,20 @@ function start(root: HTMLElement): void {
   };
   showPaper();
 
+  // ---- Pipeline (processing runs on the preview canvas GPU context) ----
+  const pipeline = new Pipeline({ settings, source, preview, debug: DEBUG });
+  pipeline.onBusy((message) => {
+    busyMessage = message;
+    updateStatus();
+  });
+
   // ---- Panel ----
-  const panel = new Panel(settings, { upload: uploadBlock.element, palette: paletteBlock });
+  const panel = new Panel(settings, {
+    upload: uploadBlock.element,
+    palette: paletteBlock,
+    splitToneMap: createToneMapBlock(settings, pipeline),
+    layers: createLayersBlock(settings, palette),
+  });
 
   const main = document.createElement("main");
   main.className = "app-main";
@@ -149,7 +167,7 @@ function start(root: HTMLElement): void {
   source.subscribe((image) => {
     if (!image) return;
     eyedropper.stop();
-    preview.setImage(image.bitmap);
+    preview.setImageSize(image.width, image.height);
     uploadBlock.showImage(image);
     updateStatus();
   });
@@ -181,6 +199,8 @@ function start(root: HTMLElement): void {
     else if (e.key === "1") preview.zoomTo(1);
     else if (e.key === "+" || e.key === "=") preview.zoomBy(Math.SQRT2);
     else if (e.key === "-" || e.key === "_") preview.zoomBy(1 / Math.SQRT2);
+    else if (e.key === "i" || e.key === "I") preview.setDisplayMode("inks");
+    else if (e.key === "o" || e.key === "O") preview.setDisplayMode("original");
     else return;
     e.preventDefault();
   });

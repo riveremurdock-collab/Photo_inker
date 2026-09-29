@@ -1,7 +1,9 @@
 // Side panel: one collapsible section per schema section, in workflow order.
 // Controls are generated from the schema; sections that need more than
 // generated controls (upload drop zone, palette list, histogram…) get a
-// custom block placed above their generated controls.
+// custom block placed above their generated controls. Sections with a parent
+// (e.g. each splitting method) are shown as sub-groups inside the parent,
+// only while their visibleWhen condition holds.
 
 import type { SettingsStore } from "../app/store";
 import { isSettingVisible } from "../schema/registry";
@@ -11,8 +13,6 @@ import { createControl, type Control } from "./controls/controls";
 
 /** Shown in sections that have no settings yet. */
 const COMING_IN: Partial<Record<SectionId, string>> = {
-  adjust: "Image adjustments arrive in Step 4.",
-  split: "Color splitting arrives in Step 4.",
   halftone: "Halftone options arrive in Step 5.",
   border: "Border options arrive in Step 11.",
   printSim: "Print simulation arrives in Step 12.",
@@ -25,9 +25,15 @@ interface BoundControl {
   update(settings: ProjectSettings): void;
 }
 
+interface SubSection {
+  section: SectionSchema;
+  element: HTMLElement;
+}
+
 export class Panel {
   readonly element: HTMLElement;
   private controls: BoundControl[] = [];
+  private subSections: SubSection[] = [];
 
   constructor(
     private store: SettingsStore,
@@ -37,7 +43,31 @@ export class Panel {
     this.element.className = "panel";
     this.element.setAttribute("aria-label", "Settings");
 
+    const bodies = new Map<string, HTMLElement>();
     for (const section of SECTIONS as readonly SectionSchema[]) {
+      if (section.parent) {
+        const parentBody = bodies.get(section.parent);
+        if (!parentBody) throw new Error(`Section ${section.id}: parent ${section.parent} must come first`);
+        const sub = document.createElement("div");
+        sub.className = "panel-subsection";
+        sub.dataset.section = section.id;
+        const title = document.createElement("h3");
+        title.textContent = section.title;
+        sub.append(title);
+        if (section.description) {
+          const d = document.createElement("p");
+          d.className = "control-help";
+          d.textContent = section.description;
+          sub.append(d);
+        }
+        const custom = customBlocks[section.id as SectionId];
+        if (custom) sub.append(custom);
+        this.addControls(section, sub);
+        parentBody.append(sub);
+        this.subSections.push({ section, element: sub });
+        continue;
+      }
+
       const details = document.createElement("details");
       details.className = "panel-section";
       details.dataset.section = section.id;
@@ -50,16 +80,11 @@ export class Panel {
       const body = document.createElement("div");
       body.className = "panel-section-body";
       details.append(body);
+      bodies.set(section.id, body);
 
       const custom = customBlocks[section.id as SectionId];
       if (custom) body.append(custom);
-
-      for (const def of section.settings) {
-        if (def.hidden) continue;
-        const bound = def.perInk ? this.perInkControl(section.id, def) : this.scalarControl(section.id, def);
-        body.append(bound.element);
-        this.controls.push(bound);
-      }
+      this.addControls(section, body);
 
       const note = COMING_IN[section.id as SectionId];
       if (note && section.settings.length === 0 && !custom) {
@@ -74,6 +99,15 @@ export class Panel {
 
     this.refresh();
     store.subscribe(() => this.refresh());
+  }
+
+  private addControls(section: SectionSchema, container: HTMLElement): void {
+    for (const def of section.settings) {
+      if (def.hidden) continue;
+      const bound = def.perInk ? this.perInkControl(section.id, def) : this.scalarControl(section.id, def);
+      container.append(bound.element);
+      this.controls.push(bound);
+    }
   }
 
   private scalarControl(sectionId: string, def: SettingDef): BoundControl {
@@ -146,6 +180,9 @@ export class Panel {
   /** Syncs every control's value and visibility (mode, visibleWhen) with the store. */
   private refresh(): void {
     const settings = this.store.get();
+    for (const { section, element } of this.subSections) {
+      element.hidden = section.visibleWhen ? !section.visibleWhen(settings as unknown as Record<string, Record<string, unknown>>) : false;
+    }
     for (const bound of this.controls) {
       bound.update(settings);
       bound.element.hidden = !isSettingVisible(bound.def, settings, bound.sectionId);

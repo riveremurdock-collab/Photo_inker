@@ -74,3 +74,33 @@ vec3 linearToSrgb(vec3 c) {
   return mix(hi, lo, vec3(lessThanEqual(c, vec3(0.0031308))));
 }
 `;
+
+/** GLSL: sRGB to linear light. */
+export const GLSL_SRGB_TO_LINEAR = /* glsl */ `
+vec3 srgbToLinear(vec3 c) {
+  vec3 lo = c / 12.92;
+  vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));
+  return mix(hi, lo, vec3(lessThanEqual(c, vec3(0.04045))));
+}
+`;
+
+/** Lightness sources, in the order the GLSL lightness() function numbers them. */
+export const LIGHTNESS_SOURCES = ["luma", "lstar", "red", "green", "blue", "max", "min"] as const;
+export type LightnessSource = (typeof LIGHTNESS_SOURCES)[number];
+
+/** GLSL: lightness (0 = black, 1 = white) of a linear-light color. Needs GLSL_LINEAR_TO_SRGB. */
+export const GLSL_LIGHTNESS = /* glsl */ `
+float lightness(vec3 lin, int source) {
+  vec3 s = linearToSrgb(lin);
+  if (source == 1) {
+    float y = dot(clamp(lin, 0.0, 1.0), vec3(0.2126, 0.7152, 0.0722));
+    return (y > 0.008856 ? 116.0 * pow(y, 1.0 / 3.0) - 16.0 : 903.3 * y) / 100.0;
+  }
+  if (source == 2) return s.r;
+  if (source == 3) return s.g;
+  if (source == 4) return s.b;
+  if (source == 5) return max(s.r, max(s.g, s.b));
+  if (source == 6) return min(s.r, min(s.g, s.b));
+  return dot(s, vec3(0.2126, 0.7152, 0.0722)); // luma (gamma-encoded)
+}
+`;

@@ -833,3 +833,166 @@ input.swatch-input {
 .ink-test-ramp-label {
   text-align: right;
 }
+
+/* ---- Sub-sections (e.g. splitting method settings) ---- */
+
+.panel-subsection {
+  display: grid;
+  gap: 12px;
+  padding: 12px 0 0;
+  border-top: 1px dashed var(--color-mint);
+}
+
+.panel-subsection h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-olive);
+}
+
+.panel-subsection h3 + .control-help {
+  margin-top: -8px;
+}
+
+/* ---- Curve editor ---- */
+
+.curve-editor {
+  position: relative;
+  width: 100%;
+}
+
+.curve-editor canvas {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--color-sage);
+  border-radius: 4px;
+  touch-action: none;
+}
+
+.curve-reset {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  padding: 1px 8px;
+  font-size: 11px;
+}
+
+.curve-editor.is-default .curve-reset {
+  display: none;
+}
+
+.control-curve .control-body {
+  display: block;
+}
+
+/* ---- Layers ---- */
+
+.layers-block,
+.layer-list {
+  display: grid;
+  gap: 8px;
+}
+
+.layer-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.layer-row {
+  display: grid;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--color-light-sage);
+}
+
+.layer-row.layer-hidden {
+  opacity: 0.5;
+}
+
+.layer-head,
+.layer-density {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.layer-name {
+  flex: 1;
+  font-size: 12px;
+  font-family: ui-monospace, monospace;
+}
+
+.layer-toggle {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.layer-toggle.active {
+  background: var(--color-olive);
+  border-color: var(--color-olive);
+  color: #fff;
+}
+
+.layer-density span:first-child {
+  font-size: 12px;
+  color: var(--color-dark-grey);
+}
+
+.layer-density input[type="range"] {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---- Tone Map ---- */
+
+.tonemap-block {
+  display: grid;
+  gap: 6px;
+}
+
+.tonemap-hist,
+.tonemap-strip {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--color-sage);
+  border-radius: 4px;
+  touch-action: none;
+}
+
+.tonemap-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: -4px;
+  font-size: 11px;
+  color: var(--color-olive);
+}
+
+.tonemap-bands {
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.tonemap-band {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.tonemap-band select {
+  max-width: 180px;
+}
+
+/* ---- Preview display mode toggle ---- */
+
+.preview-modes {
+  margin-right: 4px;
+}
+
+.preview-modes button {
+  padding: 4px 12px;
+}

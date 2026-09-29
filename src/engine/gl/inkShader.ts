@@ -19,6 +19,7 @@ import type { OverlapTable } from "../spectral/inkModel";
 import { hexToRgb } from "../../util/color";
 import { MAX_INKS } from "../../pipeline/coverage";
 
+/** Needs GLSL_SRGB_TO_LINEAR included before it. */
 export const GLSL_INKS = /* glsl */ `
 uniform vec3 uTable[16];     // linear RGB of each ink combination (bit i = ink i)
 uniform int uInkCount;
@@ -39,12 +40,6 @@ vec3 mixInks(vec4 cov) {
     sum += w * uTable[m];
   }
   return sum;
-}
-
-vec3 srgbToLinear(vec3 c) {
-  vec3 lo = c / 12.92;
-  vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));
-  return mix(hi, lo, vec3(lessThanEqual(c, vec3(0.04045))));
 }
 
 // Simple multiply blend in sRGB, like a layer set to Multiply in an image editor.

@@ -86,6 +86,15 @@ export interface SectionSchema {
   /** Pipeline stage that reruns when a setting in this section changes (unless the setting overrides it). */
   readonly stage: StageId | null;
   readonly settings: readonly SettingDef[];
+  /**
+   * Shows this section as a sub-group inside another section (e.g. a splitting
+   * method's settings inside Color Splitting) instead of as its own panel section.
+   */
+  readonly parent?: string;
+  /** Sub-sections only: one line shown under the sub-section title. */
+  readonly description?: string;
+  /** Sub-sections only: shown when this returns true for the current project settings. */
+  readonly visibleWhen?: (settings: Record<string, Record<string, unknown>>) => boolean;
 }
 
 /** Keeps literal keys and option values so ProjectSettings can be derived from the schema. */

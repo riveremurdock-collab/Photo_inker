@@ -87,11 +87,13 @@ All app settings live in one typed **`ProjectSettings`** object held by `app/sto
 Both plugin kinds follow the same shape: **settings schema in, ink coverage layers out.** Adding a method means adding one file and one line in its `registry.ts`.
 
 ```ts
-// src/plugins/splitting/types.ts
-interface SplitMethod<S> {
+// src/plugins/splitting/types.ts (as built in Step 4)
+interface SplitMethod<Sec extends SectionSchema, P> {
   id: string; label: string;
-  schema: SettingDef[];
-  split(input: SplitInput, settings: S, ctx: StageContext): Promise<CoverageSet>;
+  section: Sec;                                   // its settings: a schema section with parent "split"
+  dependsOn(ctx: SplitContext, values): unknown;  // extra cache-key inputs, e.g. ink colors
+  prepare?(values, ctx, quality: "draft" | "final"): Promise<P>;  // optional worker job
+  render(ctx, image: Target, out: Target, values, prepared?: P): void;  // GPU pass → coverage
 }
 
 // src/plugins/halftone/types.ts
@@ -104,8 +106,13 @@ interface HalftoneMethod<S> {
 }
 ```
 
-- A method decides internally whether it runs as a GPU pass or in a worker. The pipeline only sees the promise.
-- `SplitInput` carries the adjusted image in linear light plus the inks and paper. Ink Matching also gets the shared ink model (§6), so what it solves for is exactly what the preview shows.
+- **Split methods (built).**
+  - A method's settings live in its own schema section (`parent: "split"`, `visibleWhen` its method is chosen). Its file exports both the section and the method, and `plugins/splitting/registry.ts` lists them. `sections.ts` spreads `SPLIT_SECTIONS` into `SECTIONS`, so `ProjectSettings` stays fully typed.
+  - Heavy CPU work goes in `prepare()`, which the pipeline runs in the background: first a quick draft, then the final result. While it runs, the last result from the same method keeps being shown.
+  - `render()` is always a GPU pass.
+  - **Ink Matching** (`inkMatching.ts`): the worker (`workers/inkMatch.worker.ts` → `engine/spectral/solver.ts`) solves a 3D lookup table over sRGB, a 17³ draft then 33³, with Levenberg–Marquardt in Lab against the same overlap table the preview uses. The table is lightly smoothed, uploaded as a 3D texture, and looked up per pixel with trilinear filtering.
+  - **Tone Map** (`toneMap.ts` + `toneCurves.ts`): bands are turned into one 256-entry curve per ink on the CPU (the engine Advanced mode will reuse), and a GPU pass applies them by pixel lightness.
+- `SplitContext` carries the GPU, inks, paper, and overlap table, so Ink Matching solves against exactly what the preview shows.
 - **Detail Split (Step 8)** calls another registered `SplitMethod` for its base layers.
 - **Whole-image analysis (luminance, and later edges and structure)** is computed once per adjusted image and passed to `prepare`, so every layer's halftone is built from the same data.
 - **Minimum dot size and drop-out/round-up** are shared halftone settings, applied by the halftone stage around the plugin rather than by each plugin.
@@ -131,18 +138,25 @@ upload → fadeBorder → adjust → split → layerOptions → halftone → bor
 | overlapTable | palette, paper, order, opacity | 2ⁿ solid colors (linear RGB) | Palette, per-ink opacity |
 | mix | coverage + overlap table | linear RGB → sRGB display | solo/mute (display only) |
 
+- **Implementation (Step 4).** `pipeline/pipeline.ts` holds one GPU render target per stage output, with shaders in `pipeline/stages/shaders.ts`. `engine/gl/gpu.ts` provides the target and fullscreen-pass helpers.
 - **Caching.** Each stage caches its output with a key built from:
-  - a stable hash of the settings its `selectSettings()` returns
-  - the version numbers of its input stages
+  - its own settings, as JSON
+  - the version numbers of the stages it reads
 
-  Changing a setting bumps only its own stage's key, so only that stage and those after it rerun. For example, changing an ink color changes the overlap table and the mix only. It changes `split` only when the current method reads ink colors (Ink Matching, Selective Color base ink), and the method declares that in its settings selector.
-- **Superseding.** A newer request cancels an in-flight run (an `AbortSignal` on the main thread; `WorkerClient` drops superseded worker results).
-- **Data between stages.** Stages pass a **`CoverageSet`**: one map per ink, 0 = no ink, 1 = full ink.
-  - Max 4 inks, so on the GPU a CoverageSet is **one RGBA texture, one ink per channel** (RGBA16F/RGBA32F when available, RGBA8 otherwise).
-  - A `Float32Array` CPU mirror exists only when a worker stage needs it.
+  A run (at most one per animation frame) walks the stages in order and reruns only those whose key changed. Measured:
+  - A Tone Map ink color change reruns only `mix`.
+  - Solo/mute reruns only `mix`.
+  - Invert/density rerun `layerOptions` and `mix`.
+  - An Ink Matching ink color change reruns `mix` at once (old coverage, new colors), then `split` when the new lookup table arrives. `adjust` is never rerun for any of these.
+- **Superseding.** `WorkerClient` drops superseded worker results, and the worker itself stops a superseded table build at the next slice.
+- **Data between stages.**
+  - Images are `SRGB8_ALPHA8` textures: linear-light values, sRGB-encoded storage, so there is no float-render extension to depend on.
+  - Coverage is one `RGBA8` texture with one ink per channel.
+  - The mixed output is an `SRGB8_ALPHA8` texture with mipmaps, so zoomed-out display averages in linear light.
 - **Resolution.**
-  - The preview runs the pipeline on a copy downscaled to screen resolution (long edge ≈ canvas size × devicePixelRatio).
-  - At 100%+ zoom or for export, it runs at full resolution.
+  - The preview runs the pipeline on a working copy, long edge = preview size × devicePixelRatio, clamped to 1024–2560 px. The copy is made by rendering from the mipmapped full-size texture (a linear-light downscale).
+  - The "Original" view shows the full-size texture (up to 8192 px).
+  - Full-resolution processing at 100%+ zoom and for export comes with halftoning (Step 5) and export (Step 6).
   - Full-resolution export processes **tiles** with an overlap margin wide enough for kernel stages (smoothing, trapping, blur). Whole-image algorithms that can't tile, such as error diffusion, run in a worker on the full coverage map, stored as 8-bit to save memory.
 - **Debug log.** A debug flag (`?debug` in the URL) logs which stages reran and how long each took.
 

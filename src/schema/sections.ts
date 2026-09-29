@@ -1,6 +1,7 @@
 // Every section of the side panel, in workflow order. A section's settings are
 // defined here once; the panel, defaults, and (later) presets all read from this.
 
+import { SPLIT_METHOD_OPTIONS, SPLIT_SECTIONS } from "../plugins/splitting/registry";
 import { defineSection, type SectionValues } from "./types";
 
 export const uploadSection = defineSection({
@@ -103,18 +104,79 @@ export const paletteSection = defineSection({
   ],
 });
 
+// Applied to the image before color splitting, so they affect every method.
 export const adjustSection = defineSection({
   id: "adjust",
   title: "Image Adjustments",
   stage: "adjust",
-  settings: [],
+  settings: [
+    { kind: "number", key: "blackPoint", label: "Levels: black point", default: 0, min: 0, max: 100, step: 0.5, unit: "%" },
+    { kind: "number", key: "whitePoint", label: "Levels: white point", default: 100, min: 0, max: 100, step: 0.5, unit: "%" },
+    {
+      kind: "number",
+      key: "midtone",
+      label: "Levels: midtone",
+      default: 0,
+      min: -100,
+      max: 100,
+      step: 1,
+      help: "Positive brightens the midtones, negative darkens them.",
+    },
+    {
+      kind: "curve",
+      key: "curve",
+      label: "Contrast curve",
+      default: [
+        [0, 0],
+        [1, 1],
+      ],
+      help: "Click to add a point, drag to move it, double-click a point to remove it.",
+    },
+    {
+      kind: "number",
+      key: "saturation",
+      label: "Saturation boost",
+      default: 0,
+      min: 0,
+      max: 100,
+      step: 1,
+      unit: "%",
+      help: "Most useful with Ink Matching.",
+    },
+    {
+      kind: "number",
+      key: "smoothing",
+      label: "Smoothing",
+      default: 0,
+      min: 0,
+      max: 10,
+      step: 0.1,
+      help: "Softens noise and fine texture while keeping edges.",
+    },
+  ],
 });
 
 export const splitSection = defineSection({
   id: "split",
   title: "Color Splitting",
   stage: "split",
-  settings: [],
+  settings: [{ kind: "select", key: "method", label: "Method", default: "inkMatching", options: SPLIT_METHOD_OPTIONS }],
+});
+
+// Shared layer options: act on each ink layer, whatever method made it.
+// Edited in a custom block (ui/sections/layers.ts).
+export const layersSection = defineSection({
+  id: "layers",
+  title: "Layers",
+  stage: "layerOptions",
+  parent: "split",
+  settings: [
+    { kind: "number", key: "density", label: "Density", perInk: true, default: 100, min: 0, max: 200, step: 1, unit: "%", hidden: true },
+    { kind: "toggle", key: "invert", label: "Invert", perInk: true, default: false, hidden: true },
+    // Preview only: never affects exports.
+    { kind: "toggle", key: "solo", label: "Solo", perInk: true, default: false, hidden: true, stage: "mix" },
+    { kind: "toggle", key: "mute", label: "Mute", perInk: true, default: false, hidden: true, stage: "mix" },
+  ],
 });
 
 export const halftoneSection = defineSection({
@@ -175,6 +237,8 @@ export const SECTIONS = [
   paletteSection,
   adjustSection,
   splitSection,
+  ...SPLIT_SECTIONS,
+  layersSection,
   halftoneSection,
   borderSection,
   printSimSection,

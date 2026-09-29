@@ -8,8 +8,8 @@
 | 1 | Upload, modes, and preview canvas | ✅ Done |
 | 2 | Palette (basic) | ✅ Done |
 | 3 | Rendering engine core | ✅ Done |
-| 4 | Image adjustments, color splitting (basic), shared layer options | ⏳ Next |
-| 5 | Halftone (basic) | — |
+| 4 | Image adjustments, color splitting (basic), shared layer options | ✅ Done |
+| 5 | Halftone (basic) | ⏳ Next |
 | 6 | Export (basic) | — |
 | — | *End of basic build: overall report* | — |
 | 7 | Full palette options | — |
@@ -96,6 +96,36 @@
   - Pink #ff48b0 + Blue → #2f1982 (purple).
   - Pink + Yellow → #fb480f.
   - All three → #28241b.
+
+### Step 4
+- **Pipeline:** upload → adjust → (histogram, only for Tone Map) → split → layerOptions → mix. All stages are GPU passes, cached per stage (ARCHITECTURE §5).
+- **Working resolution:** preview processing is at screen resolution (long edge 1024–2560 px). Above 100% zoom the preview is upscaled until Step 5 adds full-resolution rendering.
+- **Display toggle:** Inks / Original buttons in the preview toolbar (keys I / O).
+- **Image Adjustments:**
+  - Levels (black point, white point, midtone as a gamma: `2^(value/50)`) and the contrast curve are applied per channel to sRGB values, like an image editor, as one 256-entry table.
+  - Saturation boost is applied in linear light, keeping luminance.
+  - Smoothing is a separable edge-preserving (bilateral) blur. Its radius is `value × long edge / 1000` px, so it looks the same at any resolution.
+- **Curve editor:** a new generated control for `curve` settings. Click to add a point, drag to move it, double-click or drag off the top/bottom to remove it. There is a Reset button. Interpolation is monotone cubic (`util/curve.ts`).
+- **Ink Matching:**
+  - Worker-built 3D lookup table: a 17³ draft first (~0.1–0.2 s), then 33³ (~0.75 s for 3 inks, ~1.4 s for 4 inks in Edge on this machine).
+  - The table is smoothed with [1 2 1] along each axis, to avoid jagged switches between equally good ink mixes.
+  - **Priority** (per ink, default 50) penalizes an ink's use in proportion to (1 − priority).
+  - **Sparsity** (default 25%) penalizes overlapping ink pairs and total ink.
+  - **Out-of-gamut:** Compress (default) maps the image's lightness range onto the lightness range the inks can reach, then finds the closest match. Clip only does the closest match. Chroma is not compressed.
+  - **Lightness ↔ hue** (default 50) reweights lightness error against a/b error.
+- **Tone Map (Simple):**
+  - 1–4 bands (default 4) with cutoffs at 25/50/75%, dragged on a lightness histogram.
+  - The ink per band defaults to "Auto": darker bands get darker inks, and bands left over become paper. With the default 3 inks: blue, pink, yellow, then paper in the highlights.
+  - Overlap width per boundary (default 6%), falloff Hard/Linear/Smooth (default Smooth).
+  - Fill is Flat or Tonal gradient (density fades from full at the band's dark edge to none at its light edge), with posterize steps for gradient fill.
+  - Lightness source: luma, L*, R, G, B, max, or min.
+  - A live strip shows the printed color at every tone.
+  - The "Mode: Simple/Advanced" switch comes with Advanced mode in Step 8.
+- **Layers (shared options):**
+  - Per layer: density 0–200% (default 100%), invert, solo, mute, and ▲/▼ print order (the same as the palette order).
+  - Solo/mute affect only the preview (stage `mix`).
+  - Invert is applied before density.
+- **Transparency:** transparent image areas get no ink.
 
 ## Open questions
 

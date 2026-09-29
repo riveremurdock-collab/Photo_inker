@@ -3,7 +3,9 @@
 // the point under the cursor fixed; pan uses pointer capture), rewritten for
 // a viewport-sized WebGL canvas and devicePixelRatio.
 
-import { ViewRenderer, type ViewTransform } from "./viewRenderer";
+import { ViewRenderer, type DisplaySource, type ViewTransform } from "./viewRenderer";
+
+export type DisplayMode = "inks" | "original";
 
 const MAX_SCALE = 32; // 3200%
 const FIT_PADDING_CSS = 24;
@@ -31,6 +33,9 @@ export class Preview {
   private renderer: ViewRenderer;
   private emptyState: HTMLElement;
   private zoomLabel: HTMLButtonElement;
+  private modeButtons: HTMLButtonElement[] = [];
+  private sources: Record<DisplayMode, DisplaySource | null> = { inks: null, original: null };
+  private displayMode: DisplayMode = "inks";
 
   private imageWidth = 0;
   private imageHeight = 0;
@@ -70,6 +75,22 @@ export class Preview {
       toolbar.append(b);
       return b;
     };
+    const modes = document.createElement("div");
+    modes.className = "segmented preview-modes";
+    for (const [mode, label, title] of [
+      ["inks", "Inks", "Show the image printed in your inks (I)"],
+      ["original", "Original", "Show the original image (O)"],
+    ] as const) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = label;
+      b.title = title;
+      b.dataset.value = mode;
+      b.addEventListener("click", () => this.setDisplayMode(mode));
+      modes.append(b);
+      this.modeButtons.push(b);
+    }
+    toolbar.append(modes);
     button("−", "Zoom out (−)", () => this.zoomBy(1 / Math.SQRT2));
     this.zoomLabel = button("100%", "Actual pixels (1)", () => this.zoomTo(1));
     this.zoomLabel.classList.add("zoom-label");
@@ -77,6 +98,7 @@ export class Preview {
     button("Fit", "Fit to screen (0)", () => this.fit());
     this.element.append(toolbar);
     toolbar.hidden = true;
+    this.setDisplayMode("inks");
 
     this.bindInteractions();
     this.bindDrop();
@@ -99,10 +121,39 @@ export class Preview {
     return this.imageWidth > 0;
   }
 
-  setImage(bitmap: ImageBitmap): void {
-    this.renderer.setImage(bitmap);
-    this.imageWidth = bitmap.width;
-    this.imageHeight = bitmap.height;
+  /** The WebGL context the preview draws with; pipeline textures must live here to be displayed. */
+  get gl(): WebGL2RenderingContext {
+    return this.renderer.gl;
+  }
+
+  get mode(): DisplayMode {
+    return this.displayMode;
+  }
+
+  setDisplayMode(mode: DisplayMode): void {
+    this.displayMode = mode;
+    for (const b of this.modeButtons) {
+      const on = b.dataset.value === mode;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-pressed", String(on));
+    }
+    this.renderer.setSource(this.sources[mode]);
+    this.requestRender();
+  }
+
+  /** Updates what the Inks and Original views show (null = nothing ready yet). */
+  setSource(mode: DisplayMode, source: DisplaySource | null): void {
+    this.sources[mode] = source;
+    if (mode === this.displayMode) {
+      this.renderer.setSource(source);
+      this.requestRender();
+    }
+  }
+
+  /** Called when a new image is loaded: sets the image size and fits it to the screen. */
+  setImageSize(width: number, height: number): void {
+    this.imageWidth = width;
+    this.imageHeight = height;
     this.emptyState.hidden = true;
     this.element.querySelector<HTMLElement>(".preview-toolbar")!.hidden = false;
     this.element.classList.add("has-image");
@@ -201,7 +252,7 @@ export class Preview {
     this.frameRequested = true;
     requestAnimationFrame(() => {
       this.frameRequested = false;
-      this.renderer.render(this.view);
+      this.renderer.render(this.view, this.imageWidth, this.imageHeight);
     });
   }
 

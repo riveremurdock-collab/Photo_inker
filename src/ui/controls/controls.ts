@@ -4,8 +4,10 @@
 // Slider pattern from the stipple tool: 'input' events preview (commit=false),
 // 'change' events commit (commit=true).
 
+import { createCurveEditor } from "./curveEditor";
 import type {
   ColorSetting,
+  CurvePoints,
   NumberSetting,
   SeedSetting,
   SelectSetting,
@@ -241,10 +243,10 @@ export function createControl(def: SettingDef, value: unknown, onChange: ChangeH
     case "seed":
       return seedControl(def, Number(value), onChange, label);
     case "curve": {
-      // The curve editor arrives with the first curve setting (Step 4).
       const { row: el, body } = row(def, null, label);
-      body.textContent = "Curve editor coming soon";
-      return { element: el, update: () => {} };
+      const editor = createCurveEditor(label ?? def.label, value as CurvePoints, (points, commit) => onChange(points, commit));
+      body.append(editor.element);
+      return { element: el, update: (v) => editor.update(v as CurvePoints) };
     }
   }
 }

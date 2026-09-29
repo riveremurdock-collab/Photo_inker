@@ -4,7 +4,14 @@
 
 import type { SettingsStore } from "../app/store";
 import { GLSL_INKS, INK_UNIFORMS, setInkUniforms } from "../engine/gl/inkShader";
-import { createProgram, FULLSCREEN_VERTEX, getWebGL2, GLSL_LINEAR_TO_SRGB, uniformLocations } from "../engine/gl/program";
+import {
+  createProgram,
+  FULLSCREEN_VERTEX,
+  getWebGL2,
+  GLSL_LINEAR_TO_SRGB,
+  GLSL_SRGB_TO_LINEAR,
+  uniformLocations,
+} from "../engine/gl/program";
 import { inkSetupFrom, OverlapTableCache } from "../engine/spectral/overlapTable";
 
 type CompareMode = "spectral" | "multiply" | "split";
@@ -16,6 +23,7 @@ uniform sampler2D uCoverage; // RGBA32F: ink coverage per channel
 uniform sampler2D uFlags;    // RGBA8: r = use multiply, g = inside a swatch
 uniform int uHeight;
 out vec4 outColor;
+${GLSL_SRGB_TO_LINEAR}
 ${GLSL_INKS}
 ${GLSL_LINEAR_TO_SRGB}
 void main() {
