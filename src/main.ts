@@ -125,7 +125,7 @@ function start(root: HTMLElement): void {
 
   const main = document.createElement("main");
   main.className = "app-main";
-  main.append(preview.element, panel.element);
+  main.append(panel.element, preview.element);
   root.append(header, main, status);
 
   // ---- Wiring ----

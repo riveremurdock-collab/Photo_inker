@@ -81,6 +81,7 @@
 - **Paper label:** the paper row reads "Background" in Digital mode and "Paper" in Print mode.
 - **Transparent PNGs:** transparent areas show the paper color.
 - **Panel width:** widened to 370 px.
+- **Layout:** the settings panel is on the left and the preview on the right (user request). On narrow screens the preview stays above the panel.
 
 ## Open questions
 

@@ -184,7 +184,7 @@ body[data-mode="print"] .mode-badge {
 
 .app-main {
   display: grid;
-  grid-template-columns: 1fr var(--panel-width);
+  grid-template-columns: var(--panel-width) 1fr;
   min-height: 0;
 }
 
@@ -313,7 +313,7 @@ body[data-mode="print"] .mode-badge {
 
 .panel {
   overflow-y: auto;
-  border-left: 1px solid var(--color-mint);
+  border-right: 1px solid var(--color-mint);
   background: #fff;
 }
 
@@ -475,7 +475,8 @@ body[data-mode="print"] .mode-badge {
     grid-template-rows: minmax(300px, 1fr) auto;
   }
   .panel {
-    border-left: none;
+    order: 2; /* the panel comes first in the page; show the preview above it */
+    border-right: none;
     border-top: 1px solid var(--color-mint);
     max-height: 50vh;
   }
