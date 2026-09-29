@@ -710,3 +710,12 @@ body[data-mode="print"] .mode-badge {
   box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.2);
   vertical-align: -1px;
 }
+
+.swatch-custom-only {
+  margin-top: 0;
+}
+
+.swatch-custom-only input[type="color"] {
+  width: 56px;
+  height: 36px;
+}

@@ -63,7 +63,7 @@
 - **Ink names:** used for export file names.
   - They follow the color automatically: the matching Riso ink within ΔE 6, otherwise a plain hue name such as "Orange".
   - Once the user types a name, it stays. Clearing it goes back to automatic naming.
-- **Presets:** 31 Riso ink presets and 7 paper presets. The hex values are approximate screen colors, not calibrated.
+- **Presets:** the ink color popup has only a color picker and hex field (Riso ink approximations will be added later, per request). The paper popup keeps 7 paper presets. The 31-ink list in `app/inkLibrary.ts` is still used only to name inks.
 - **Manual vs Auto:**
   - Palette colors are either Manual or Auto.
   - Auto recomputes on upload, ink count change, and the background toggle, plus paper change when the paper is kept.

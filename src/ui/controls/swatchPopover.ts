@@ -1,5 +1,5 @@
-// Popover opened from a color swatch: a grid of named presets plus a custom
-// color picker and hex field. Only one popover is open at a time.
+// Popover opened from a color swatch: an optional grid of named presets plus
+// a color picker and hex field. Only one popover is open at a time.
 
 import type { NamedColor } from "../../app/inkLibrary";
 
@@ -54,16 +54,16 @@ export function openSwatchPopover(options: SwatchPopoverOptions): void {
     });
     grid.append(b);
   }
-  pop.append(grid);
+  if (options.presets.length > 0) pop.append(grid);
 
   const custom = document.createElement("div");
-  custom.className = "swatch-custom";
+  custom.className = options.presets.length > 0 ? "swatch-custom" : "swatch-custom swatch-custom-only";
   const label = document.createElement("span");
-  label.textContent = "Custom";
+  label.textContent = options.presets.length > 0 ? "Custom" : "Color";
   const picker = document.createElement("input");
   picker.type = "color";
   picker.value = options.current;
-  picker.setAttribute("aria-label", "Custom color");
+  picker.setAttribute("aria-label", options.presets.length > 0 ? "Custom color" : options.title);
   const hex = document.createElement("input");
   hex.type = "text";
   hex.className = "control-hex";
@@ -114,7 +114,8 @@ export function openSwatchPopover(options: SwatchPopoverOptions): void {
     if (openPopover?.element === pop) openPopover = null;
   }
   openPopover = { element: pop, close };
-  (grid.querySelector("button.current") as HTMLElement | null ?? grid.querySelector("button"))?.focus();
+  const focusTarget = (grid.querySelector("button.current") ?? grid.querySelector("button") ?? hex) as HTMLElement;
+  focusTarget.focus();
 }
 
 function position(pop: HTMLElement, anchor: HTMLElement): void {

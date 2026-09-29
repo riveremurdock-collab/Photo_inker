@@ -1,9 +1,9 @@
 // Palette section: Manual/Auto switch, the ink list (top to bottom = print
 // order), and the paper/background color. Each ink row has a swatch (opens the
-// Riso ink presets), a name, a hex field, an eyedropper, reorder buttons, and
+// color picker and hex field), a name, a hex field, an eyedropper, reorder buttons, and
 // a remove button.
 
-import { PAPER_PRESETS, RISO_INKS } from "../../app/inkLibrary";
+import { PAPER_PRESETS } from "../../app/inkLibrary";
 import type { PaletteActions } from "../../app/palette";
 import type { SourceStore } from "../../app/source";
 import type { SettingsStore } from "../../app/store";
@@ -96,12 +96,12 @@ export function createPaletteBlock(
     const swatch = document.createElement("button");
     swatch.type = "button";
     swatch.className = "swatch";
-    swatch.setAttribute("aria-label", `Ink ${slot + 1} color: choose a Riso ink or custom color`);
+    swatch.setAttribute("aria-label", `Ink ${slot + 1} color`);
     swatch.addEventListener("click", () =>
       openSwatchPopover({
         anchor: swatch,
-        title: "Riso inks",
-        presets: RISO_INKS,
+        title: "Ink color",
+        presets: [], // Riso ink approximations will be added here later
         current: store.get().palette.inkColor[slot] ?? "#000000",
         onPick: (hex, commit) => actions.setInkColor(slot, hex, commit),
       }),
