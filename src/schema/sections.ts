@@ -1,6 +1,7 @@
 // Every section of the side panel, in workflow order. A section's settings are
 // defined here once; the panel, defaults, and (later) presets all read from this.
 
+import { HALFTONE_SECTIONS, HALFTONE_TYPE_OPTIONS } from "../plugins/halftone/registry";
 import { SPLIT_METHOD_OPTIONS, SPLIT_SECTIONS } from "../plugins/splitting/registry";
 import { defineSection, type SectionValues } from "./types";
 
@@ -179,11 +180,40 @@ export const layersSection = defineSection({
   ],
 });
 
+// One halftone type for the whole image; each type has its own sub-section
+// (plugins/halftone). The minimum dot size is shared by every type.
 export const halftoneSection = defineSection({
   id: "halftone",
   title: "Halftone",
   stage: "halftone",
-  settings: [],
+  settings: [
+    { kind: "select", key: "type", label: "Type", default: "am", options: HALFTONE_TYPE_OPTIONS },
+    {
+      kind: "number",
+      key: "minDot",
+      label: "Minimum dot size",
+      perInk: true,
+      default: 1.5,
+      min: 0,
+      max: 8,
+      step: 0.5,
+      unit: "px",
+      help: "Smallest dot allowed, in output pixels (1–2 px at 600 DPI). Riso machines struggle to print tiny dots.",
+      visibleWhen: (h) => h.type !== "none",
+    },
+    {
+      kind: "select",
+      key: "minDotMode",
+      label: "Tones lighter than the minimum",
+      default: "drop",
+      display: "segmented",
+      options: [
+        { value: "drop", label: "Drop to paper" },
+        { value: "round", label: "Round up" },
+      ],
+      visibleWhen: (h) => h.type === "am",
+    },
+  ],
 });
 
 export const borderSection = defineSection({
@@ -218,9 +248,51 @@ export const exportSection = defineSection({
       ],
     },
     {
+      kind: "select",
+      key: "digitalSize",
+      label: "Output size",
+      default: "original",
+      display: "segmented",
+      modes: ["digital"],
+      stage: "halftone",
+      options: [
+        { value: "original", label: "Original" },
+        { value: "double", label: "2×" },
+        { value: "custom", label: "Custom" },
+      ],
+      help: "Halftone sizes are measured in output pixels.",
+    },
+    {
+      kind: "number",
+      key: "digitalWidth",
+      label: "Output width",
+      default: 3000,
+      min: 100,
+      max: 16000,
+      step: 10,
+      unit: "px",
+      modes: ["digital"],
+      stage: "halftone",
+      visibleWhen: (e) => e.digitalSize === "custom",
+    },
+    {
+      kind: "number",
+      key: "printWidth",
+      label: "Print width",
+      default: 8,
+      min: 1,
+      max: 40,
+      step: 0.1,
+      unit: "in",
+      modes: ["print"],
+      stage: "halftone",
+      help: "Width of the printed image. Page size and placement come later.",
+    },
+    {
       kind: "number",
       key: "dpi",
       label: "Resolution",
+      stage: "halftone",
       default: 600,
       min: 150,
       max: 1200,
@@ -240,6 +312,7 @@ export const SECTIONS = [
   ...SPLIT_SECTIONS,
   layersSection,
   halftoneSection,
+  ...HALFTONE_SECTIONS,
   borderSection,
   printSimSection,
   exportSection,

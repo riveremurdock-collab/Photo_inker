@@ -12,6 +12,8 @@
     "src/workers/yield.ts",
     "src/util/**/*.ts",
     "src/engine/spectral/solver.ts",
-    "src/workers/inkMatchTypes.ts"
+    "src/workers/inkMatchTypes.ts",
+    "src/workers/blueNoiseTypes.ts",
+    "src/engine/halftone/voidAndCluster.ts"
   ]
 }

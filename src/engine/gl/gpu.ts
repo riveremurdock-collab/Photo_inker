@@ -18,7 +18,7 @@ export interface Target {
   format: TargetFormat;
 }
 
-type UniformValue =
+export type UniformValue =
   | number
   | boolean
   | readonly number[]
@@ -67,11 +67,22 @@ export class Gpu {
 
   /** Runs a fullscreen fragment shader into `target`. Textures are bound to units in the order they appear. */
   pass(fragmentSource: string, target: Target, uniforms: Record<string, UniformValue>): void {
+    this.draw(fragmentSource, target.framebuffer, target.width, target.height, uniforms);
+  }
+
+  /** Like pass(), but into any framebuffer (null = the canvas). */
+  draw(
+    fragmentSource: string,
+    framebuffer: WebGLFramebuffer | null,
+    width: number,
+    height: number,
+    uniforms: Record<string, UniformValue>,
+  ): void {
     const gl = this.gl;
     const { program, uniforms: locations } = this.program(fragmentSource);
     gl.useProgram(program);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
-    gl.viewport(0, 0, target.width, target.height);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.viewport(0, 0, width, height);
     gl.disable(gl.BLEND);
 
     let unit = 0;
@@ -108,6 +119,9 @@ export class Gpu {
           case gl.INT_VEC4:
           case gl.BOOL_VEC4:
             gl.uniform4iv(loc, arr as Int32List);
+            break;
+          case gl.FLOAT_MAT2:
+            gl.uniformMatrix2fv(loc, false, arr as Float32List);
             break;
           default:
             gl.uniform1fv(loc, arr as Float32List);

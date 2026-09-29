@@ -20,7 +20,11 @@ export interface SolveOptions {
   sparsity: number;
   /** 0..1: 0 = keep lightness exact, 1 = keep hue exact. */
   balance: number;
-  /** Compress the image's lightness range into what the inks can reach, instead of clipping. */
+  /**
+   * Match relative to the paper (image white = bare paper) and compress the
+   * image's lightness range into what the inks can reach. Otherwise match
+   * absolute colors and clip.
+   */
   compress: boolean;
 }
 
@@ -242,6 +246,9 @@ export async function buildInkLut(
 
   // Lightness range the inks can reach (paper = lightest, darkest overlap = darkest).
   const tmpLab = new Float64Array(3);
+  const paperR = opts.table[0]!;
+  const paperG = opts.table[1]!;
+  const paperB = opts.table[2]!;
   let lMax = -Infinity;
   let lMin = Infinity;
   for (let mask = 0; mask < 1 << n; mask++) {
@@ -286,13 +293,18 @@ export async function buildInkLut(
   for (let bi = 0; bi < size; bi++) {
     for (let gi = 0; gi < size; gi++) {
       for (let ri = 0; ri < size; ri++) {
-        linearToLabInto(
-          srgbToLinear(ri / (size - 1)),
-          srgbToLinear(gi / (size - 1)),
-          srgbToLinear(bi / (size - 1)),
-          target,
-        );
-        if (opts.compress) target[0] = lMin + (target[0]! / 100) * (lMax - lMin);
+        const r = srgbToLinear(ri / (size - 1));
+        const g = srgbToLinear(gi / (size - 1));
+        const b = srgbToLinear(bi / (size - 1));
+        if (opts.compress) {
+          // Relative to the paper: image white becomes bare paper (no ink tint
+          // to "correct" a warm or colored paper), then the lightness range is
+          // fitted into what the inks can reach.
+          linearToLabInto(r * paperR, g * paperG, b * paperB, target);
+          target[0] = lMin + (target[0]! / Math.max(1e-6, lMax)) * (lMax - lMin);
+        } else {
+          linearToLabInto(r, g, b, target);
+        }
 
         // Start A: the neighbor's answer.
         if (ri === 0) warm.set(haveWarm ? rowStart : warm);
@@ -334,7 +346,12 @@ export async function buildInkLut(
   // Where two ink mixes match a color about equally well, neighboring entries
   // can flip between them, which would show as jagged edges after
   // interpolation. A light blur along each axis makes such switches gradual.
+  // Keep the white entry exactly as solved, so image white stays bare paper
+  // (smoothing would otherwise pull in a little ink from its neighbors).
+  const whiteIndex = (size * size * size - 1) * n;
+  const white = solved.slice(whiteIndex, whiteIndex + n);
   smoothLut(solved, size, n);
+  solved.set(white, whiteIndex);
   for (let k = 0; k < size * size * size; k++) {
     for (let i = 0; i < n; i++) out[k * 4 + i] = Math.round(Math.min(1, Math.max(0, solved[k * n + i]!)) * 255);
   }

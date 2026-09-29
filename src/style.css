@@ -996,3 +996,9 @@ input.swatch-input {
 .preview-modes button {
   padding: 4px 12px;
 }
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}

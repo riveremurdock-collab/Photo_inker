@@ -1,7 +1,8 @@
 // The processing pipeline for the preview:
 //
-//   upload → adjust → split → layerOptions → mix → display
-//                                    overlapTable ┘
+//   upload → adjust → split → layerOptions → mix ──────────────→ display (halftone None)
+//                                         └→ halftone compositor → display (AM / FM)
+//                           overlapTable ┘
 //
 // Every stage keeps its output and a key made of its own settings and the
 // versions of the stages it reads. A run walks the stages in order and reruns
@@ -9,40 +10,51 @@
 // overlap table and the mix (plus Ink Matching's lookup table, which depends
 // on the ink colors). With ?debug in the URL, each run logs what reran.
 //
-// Fade border, halftone, solid/paper border, and print simulation slot in
-// between these stages in later steps.
+// The stages run on a working copy of up to 4096 px. For halftone None on a
+// larger image, zooming in past that resolution re-runs the same passes for
+// just the visible area at full resolution ("detail"). Halftoned views don't
+// need it: the compositor evaluates dots at exact output resolution.
+//
+// Fade border, solid/paper border, and print simulation slot in later.
 
+import { outputScale } from "../app/output";
 import type { SourceStore } from "../app/source";
 import type { SettingsStore } from "../app/store";
-import { Gpu, type Target } from "../engine/gl/gpu";
-import { INK_UNIFORMS } from "../engine/gl/inkShader";
-import { inkSetupFrom, OverlapTableCache } from "../engine/spectral/overlapTable";
+import { Gpu, type Target, type UniformValue } from "../engine/gl/gpu";
 import { LIGHTNESS_SOURCES } from "../engine/gl/program";
+import { inkSetupFrom, OverlapTableCache } from "../engine/spectral/overlapTable";
+import { halftoneMethod } from "../plugins/halftone/registry";
+import type { HalftoneContext, HalftoneMethod } from "../plugins/halftone/types";
 import { splitMethod } from "../plugins/splitting/registry";
-import type { SplitContext } from "../plugins/splitting/types";
+import type { SplitContext, SplitMethod } from "../plugins/splitting/types";
 import type { ProjectSettings } from "../schema/sections";
 import type { Preview } from "../ui/preview/preview";
+import type { DetailTexture } from "../ui/preview/viewRenderer";
 import { hexToRgb } from "../util/color";
 import { sampleCurve, type CurvePoint } from "../util/curve";
 import { SupersededError } from "../workers/workerClient";
+import { Compositor } from "./compositor";
 import { MAX_INKS } from "./coverage";
-import { ADJUST, COPY, LAYERS, LIGHTNESS, MIX, SMOOTH } from "./stages/shaders";
+import { ADJUST, ANALYSIS, COPY, LAYERS, LIGHTNESS, MIX, SMOOTH } from "./stages/shaders";
 
 /** Longest texture edge used for the original image on the GPU. */
 const SOURCE_TEXTURE_CAP = 8192;
 /**
  * Longest edge the preview is processed at. Images up to this size are
  * processed at full resolution; larger ones are downscaled once with an area
- * filter. Displayed through mipmaps, the inked view is as sharp as the
- * original at any zoom up to this resolution.
+ * filter (and get a full-resolution "detail" render when zoomed in).
  */
 const MAX_WORKING_EDGE = 4096;
 const HISTOGRAM_SIZE = 256;
+/** Largest detail render, in pixels (about a 4K screen). */
+const MAX_DETAIL_PIXELS = 3840 * 2400;
 
 export interface PipelineHost {
   settings: SettingsStore;
   source: SourceStore;
   preview: Preview;
+  /** Preview background around the image, linear RGB. */
+  background: [number, number, number];
   debug: boolean;
 }
 
@@ -53,8 +65,32 @@ interface Prepared {
   key: string;
   methodId: string;
   value: unknown;
-  /** Bumps each time a new result arrives (part of the split key). */
+  /** Bumps each time a new result arrives (part of the stage key). */
   id: number;
+}
+
+/** Render targets for one run of the processing passes (whole image or a detail region). */
+interface PassTargets {
+  adjusted: Target | null;
+  smoothA: Target | null;
+  smoothB: Target | null;
+  coverage: Target | null;
+  layered: Target | null;
+  mixed: Target | null;
+}
+
+const emptyTargets = (): PassTargets => ({ adjusted: null, smoothA: null, smoothB: null, coverage: null, layered: null, mixed: null });
+
+/** Everything the split/layer/mix passes need, captured by the last whole-image run (reused by detail renders). */
+interface PassInputs {
+  adjust: ProjectSettings["adjust"];
+  method: SplitMethod;
+  values: never;
+  ctx: SplitContext;
+  prepared: unknown;
+  layerUniforms: Record<string, UniformValue>;
+  inkUniforms: Record<string, UniformValue>;
+  visible: number[];
 }
 
 export class Pipeline {
@@ -65,28 +101,37 @@ export class Pipeline {
   private log: string[] = [];
 
   private sourceTexture: WebGLTexture | null = null;
+  private sourceTextureWidth = 0;
   private working: Target | null = null;
-  private adjusted: Target | null = null;
-  private smoothA: Target | null = null;
-  private smoothB: Target | null = null;
+  private main: PassTargets = emptyTargets();
   private adjustOutput: Target | null = null;
   private lightness: Target | null = null;
-  private coverage: Target | null = null;
-  private layered: Target | null = null;
-  private mixed: Target | null = null;
+  private analysisTarget: Target | null = null;
+  private analysisVersion = -1;
   private toneTexture: WebGLTexture | null = null;
+  private inputs: PassInputs | null = null;
 
   private prepared: Prepared | null = null;
   private preparing: string | null = null;
+  private halftonePrepared: Prepared | null = null;
+  private halftonePreparing: string | null = null;
   private preparedCount = 0;
+
+  private compositor: Compositor;
+  private detailTargets: PassTargets = emptyTargets();
+  private detailSource: Target | null = null;
+  private detail: DetailTexture | null = null;
+  private halftoned = false;
 
   private frameRequested = false;
   private histogramListeners = new Set<HistogramListener>();
   private busyListeners = new Set<BusyListener>();
+  private busy = new Map<string, string>();
   private lastHistogram: { data: Uint32Array; source: string } | null = null;
 
   constructor(private host: PipelineHost) {
     this.gpu = new Gpu(host.preview.gl);
+    this.compositor = new Compositor(this.gpu);
     host.settings.subscribe(() => this.schedule());
     host.source.subscribe(() => this.schedule());
   }
@@ -140,7 +185,9 @@ export class Pipeline {
       this.runHistogram(settings) &&
       this.runSplit(settings) &&
       this.runLayers(settings) &&
-      this.runMix(settings);
+      this.runMix(settings) &&
+      this.runHalftone(settings, image.width, image.height);
+    if (ok) this.renderDetail();
 
     if (this.host.debug && this.log.length) {
       console.debug(`[pipeline] reran: ${this.log.join(", ")} (total ${(performance.now() - t0).toFixed(1)}ms)${ok ? "" : " — waiting"}`);
@@ -148,10 +195,6 @@ export class Pipeline {
   }
 
   // ---- upload: original image → GPU, plus the working copy the pipeline processes ----
-
-  private workingEdge(): number {
-    return Math.min(MAX_WORKING_EDGE, this.gpu.maxTextureSize);
-  }
 
   private runUpload(bitmap: ImageBitmap, imageVersion: number): boolean {
     return this.stage("upload", String(imageVersion), () => {
@@ -182,18 +225,21 @@ export class Pipeline {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       this.sourceTexture = tex;
-      this.host.preview.setSource("original", { texture: tex, textureWidth: upload.width });
-      if (upload !== bitmap) upload.close();
+      this.sourceTextureWidth = upload.width;
+      this.host.preview.setSource("original", { kind: "texture", texture: tex, textureWidth: upload.width });
 
-      const k = Math.min(1, this.workingEdge() / long);
+      const k = Math.min(1, Math.min(MAX_WORKING_EDGE, this.gpu.maxTextureSize) / long);
       const w = Math.max(1, Math.round(bitmap.width * k));
       const h = Math.max(1, Math.round(bitmap.height * k));
       this.working = this.gpu.ensureTarget(this.working, w, h, "image");
       this.gpu.pass(COPY, this.working, {
         uImage: { texture: tex },
         uRatio: [upload.width / w, upload.height / h],
+        uRegion: [0, 0, 1, 1],
         uSize: [w, h],
       });
+      if (upload !== bitmap) upload.close();
+      this.clearDetail();
     });
   }
 
@@ -202,33 +248,37 @@ export class Pipeline {
   private runAdjust(settings: ProjectSettings): boolean {
     const a = settings.adjust;
     return this.stage("adjust", `${JSON.stringify(a)}|${this.version("upload")}`, () => {
-      const src = this.working!;
-      const { width: w, height: h } = src;
       this.uploadTone(a.blackPoint, a.whitePoint, a.midtone, a.curve);
-      this.adjusted = this.gpu.ensureTarget(this.adjusted, w, h, "image");
-      this.gpu.pass(ADJUST, this.adjusted, {
-        uImage: { texture: src.texture },
-        uTone: { texture: this.toneTexture! },
-        uSaturation: a.saturation / 100,
-        uSize: [w, h],
-      });
-      this.adjustOutput = this.adjusted;
-      if (a.smoothing > 0) {
-        const sigma = (a.smoothing * Math.max(w, h)) / 1000;
-        this.smoothA = this.gpu.ensureTarget(this.smoothA, w, h, "image");
-        this.smoothB = this.gpu.ensureTarget(this.smoothB, w, h, "image");
-        const common = { uSigma: sigma, uRange: 0.12, uSize: [w, h] };
-        this.gpu.pass(SMOOTH, this.smoothA, { ...common, uImage: { texture: this.adjusted.texture }, uDir: [1, 0] });
-        this.gpu.pass(SMOOTH, this.smoothB, { ...common, uImage: { texture: this.smoothA.texture }, uDir: [0, 1] });
-        this.adjustOutput = this.smoothB;
-      } else {
-        // Free the smoothing buffers while smoothing is off.
-        if (this.smoothA) this.gpu.deleteTarget(this.smoothA);
-        if (this.smoothB) this.gpu.deleteTarget(this.smoothB);
-        this.smoothA = null;
-        this.smoothB = null;
-      }
+      const src = this.working!;
+      // Smoothing radius is relative to the image's long edge, so it looks the same at any resolution.
+      const sigma = (a.smoothing * Math.max(src.width, src.height)) / 1000;
+      this.adjustOutput = this.adjustPasses(a, src, this.main, sigma);
     });
+  }
+
+  private adjustPasses(a: ProjectSettings["adjust"], src: Target, t: PassTargets, sigma: number): Target {
+    const { width: w, height: h } = src;
+    t.adjusted = this.gpu.ensureTarget(t.adjusted, w, h, "image");
+    this.gpu.pass(ADJUST, t.adjusted, {
+      uImage: { texture: src.texture },
+      uTone: { texture: this.toneTexture! },
+      uSaturation: a.saturation / 100,
+      uSize: [w, h],
+    });
+    if (a.smoothing <= 0) {
+      // Free the smoothing buffers while smoothing is off.
+      if (t.smoothA) this.gpu.deleteTarget(t.smoothA);
+      if (t.smoothB) this.gpu.deleteTarget(t.smoothB);
+      t.smoothA = null;
+      t.smoothB = null;
+      return t.adjusted;
+    }
+    t.smoothA = this.gpu.ensureTarget(t.smoothA, w, h, "image");
+    t.smoothB = this.gpu.ensureTarget(t.smoothB, w, h, "image");
+    const common = { uSigma: sigma, uRange: 0.12, uSize: [w, h] };
+    this.gpu.pass(SMOOTH, t.smoothA, { ...common, uImage: { texture: t.adjusted.texture }, uDir: [1, 0] });
+    this.gpu.pass(SMOOTH, t.smoothB, { ...common, uImage: { texture: t.smoothA.texture }, uDir: [0, 1] });
+    return t.smoothB;
   }
 
   /** Levels then contrast curve, as one 256-entry table over sRGB values. */
@@ -242,8 +292,7 @@ export class Pipeline {
     for (let i = 0; i < 256; i++) {
       let x = Math.min(1, Math.max(0, (i / 255 - bp) / (wp - bp)));
       x = Math.pow(x, 1 / gamma);
-      const y = curveTable[Math.round(x * 1023)]!;
-      bytes[i * 4] = Math.round(y * 255);
+      bytes[i * 4] = Math.round(curveTable[Math.round(x * 1023)]! * 255);
     }
     if (!this.toneTexture) {
       this.toneTexture = gl.createTexture()!;
@@ -277,6 +326,17 @@ export class Pipeline {
     });
   }
 
+  /** Whole-image analysis of the adjusted image, computed on first request per adjusted image. */
+  private analysis(): Target {
+    const src = this.adjustOutput!;
+    if (this.analysisVersion !== this.version("adjust") || !this.analysisTarget) {
+      this.analysisTarget = this.gpu.ensureTarget(this.analysisTarget, src.width, src.height, "coverage");
+      this.gpu.pass(ANALYSIS, this.analysisTarget, { uImage: { texture: src.texture }, uSize: [src.width, src.height] });
+      this.analysisVersion = this.version("adjust");
+    }
+    return this.analysisTarget;
+  }
+
   // ---- split: the chosen color splitting method ----
 
   private splitContext(settings: ProjectSettings): SplitContext {
@@ -301,7 +361,7 @@ export class Pipeline {
     let preparedId = 0;
     if (method.prepare) {
       const pkey = `${method.id}|${valuesKey}|${dependency}`;
-      if (this.prepared?.key !== pkey && this.preparing !== pkey) this.startPrepare(pkey, method, values, ctx);
+      if (this.prepared?.key !== pkey && this.preparing !== pkey) this.startSplitPrepare(pkey, method, values, ctx);
       // Until the new result arrives, keep using the last one from this method
       // (e.g. while dragging an ink color the old coverage stays and only the colors update).
       if (!this.prepared || this.prepared.methodId !== method.id) return false;
@@ -309,17 +369,32 @@ export class Pipeline {
       preparedId = this.prepared.id;
     }
 
+    this.inputs = {
+      adjust: settings.adjust,
+      method,
+      values,
+      ctx,
+      prepared: preparedValue,
+      layerUniforms: this.layerUniforms(settings),
+      inkUniforms: this.inkUniforms(settings),
+      visible: this.visible(settings),
+    };
+
     const key = [method.id, valuesKey, method.prepare ? `prepared ${preparedId}` : dependency, ctx.inkCount, this.version("adjust")].join("|");
     return this.stage("split", key, () => {
-      const src = this.adjustOutput!;
-      this.coverage = this.gpu.ensureTarget(this.coverage, src.width, src.height, "coverage");
-      method.render(ctx, src, this.coverage, values, preparedValue as never);
+      this.splitPass(this.inputs!, this.adjustOutput!, this.main);
     });
   }
 
-  private startPrepare(pkey: string, method: ReturnType<typeof splitMethod>, values: never, ctx: SplitContext): void {
+  private splitPass(inputs: PassInputs, src: Target, t: PassTargets): Target {
+    t.coverage = this.gpu.ensureTarget(t.coverage, src.width, src.height, "coverage");
+    inputs.method.render(inputs.ctx, src, t.coverage, inputs.values, inputs.prepared as never);
+    return t.coverage;
+  }
+
+  private startSplitPrepare(pkey: string, method: SplitMethod, values: never, ctx: SplitContext): void {
     this.preparing = pkey;
-    this.setBusy("Matching inks…");
+    this.setBusy("split", "Matching inks…");
     const accept = (value: unknown) => {
       if (this.preparing !== pkey) return false;
       this.prepared = { key: pkey, methodId: method.id, value, id: ++this.preparedCount };
@@ -332,7 +407,7 @@ export class Pipeline {
         return method.prepare!(values, ctx, "final").then((final) => {
           if (accept(final)) {
             this.preparing = null;
-            this.setBusy(null);
+            this.setBusy("split", null);
           }
         });
       })
@@ -341,73 +416,240 @@ export class Pipeline {
         console.error(err);
         if (this.preparing === pkey) {
           this.preparing = null;
-          this.setBusy(null);
+          this.setBusy("split", null);
         }
       });
   }
 
-  private setBusy(message: string | null): void {
-    for (const l of this.busyListeners) l(message);
+  private setBusy(id: string, message: string | null): void {
+    if (message) this.busy.set(id, message);
+    else this.busy.delete(id);
+    const text = [...this.busy.values()].join(" · ") || null;
+    for (const l of this.busyListeners) l(text);
   }
 
   // ---- layer options: invert, density ----
 
-  private runLayers(settings: ProjectSettings): boolean {
+  private layerUniforms(settings: ProjectSettings): Record<string, UniformValue> {
     const n = settings.palette.inkCount;
     const { density, invert } = settings.layers;
     const vec = (f: (i: number) => number) => Array.from({ length: MAX_INKS }, (_, i) => (i < n ? f(i) : 0));
-    const uDensity = vec((i) => (density[i] ?? 100) / 100);
-    const uInvert = vec((i) => (invert[i] ? 1 : 0));
-    const uActive = vec(() => 1);
-    return this.stage("layerOptions", `${uDensity}|${uInvert}|${n}|${this.version("split")}`, () => {
-      const src = this.coverage!;
-      this.layered = this.gpu.ensureTarget(this.layered, src.width, src.height, "coverage");
-      this.gpu.pass(LAYERS, this.layered, {
-        uCoverage: { texture: src.texture },
-        uDensity,
-        uInvert,
-        uActive,
-        uSize: [src.width, src.height],
-      });
+    return {
+      uDensity: vec((i) => (density[i] ?? 100) / 100),
+      uInvert: vec((i) => (invert[i] ? 1 : 0)),
+      uActive: vec(() => 1),
+    };
+  }
+
+  private runLayers(settings: ProjectSettings): boolean {
+    const uniforms = this.layerUniforms(settings);
+    return this.stage("layerOptions", `${JSON.stringify(uniforms)}|${this.version("split")}`, () => {
+      this.layersPass(uniforms, this.main.coverage!, this.main);
     });
+  }
+
+  private layersPass(uniforms: Record<string, UniformValue>, src: Target, t: PassTargets): Target {
+    t.layered = this.gpu.ensureTarget(t.layered, src.width, src.height, "coverage");
+    this.gpu.pass(LAYERS, t.layered, { ...uniforms, uCoverage: { texture: src.texture }, uSize: [src.width, src.height] });
+    return t.layered;
   }
 
   // ---- mix: coverage → color with the spectral overlap table ----
 
-  private runMix(settings: ProjectSettings): boolean {
+  private visible(settings: ProjectSettings): number[] {
     const n = settings.palette.inkCount;
     const { solo, mute } = settings.layers;
     const anySolo = solo.slice(0, n).some(Boolean);
-    const uVisible = Array.from({ length: MAX_INKS }, (_, i) => (i < n && (anySolo ? solo[i] : !mute[i]) ? 1 : 0));
+    return Array.from({ length: MAX_INKS }, (_, i) => (i < n && (anySolo ? solo[i] : !mute[i]) ? 1 : 0));
+  }
+
+  private inkUniforms(settings: ProjectSettings): Record<string, UniformValue> {
     const setup = inkSetupFrom(settings);
     const table = this.tables.get(setup);
-    const tableKey = JSON.stringify(setup);
-    return this.stage("mix", `${tableKey}|${uVisible}|${this.version("layerOptions")}`, () => {
-      const src = this.layered!;
-      this.mixed = this.gpu.ensureTarget(this.mixed, src.width, src.height, "image", { mipmaps: true });
-      const tableData = new Float32Array(16 * 3);
-      tableData.set(table.colors.subarray(0, 48));
-      const srgb = (hex: string) => {
-        const c = hexToRgb(hex) ?? { r: 0, g: 0, b: 0 };
-        return [c.r / 255, c.g / 255, c.b / 255];
-      };
-      const inkSrgb = new Float32Array(MAX_INKS * 3);
-      setup.inks.forEach((ink, i) => inkSrgb.set(srgb(ink.hex), i * 3));
-      const uniforms: Record<(typeof INK_UNIFORMS)[number], Float32Array | number | number[]> = {
-        uTable: tableData,
-        uInkCount: table.inkCount,
-        uPaperSrgb: srgb(setup.paper),
-        uInkSrgb: inkSrgb,
-      };
-      this.gpu.pass(MIX, this.mixed, {
-        ...uniforms,
-        uCoverage: { texture: src.texture },
-        uImage: { texture: this.working!.texture },
-        uVisible,
-        uSize: [src.width, src.height],
-      });
-      this.gpu.generateMipmaps(this.mixed);
-      this.host.preview.setSource("inks", { texture: this.mixed.texture, textureWidth: this.mixed.width });
+    const tableData = new Float32Array(16 * 3);
+    tableData.set(table.colors.subarray(0, 48));
+    const srgb = (hex: string) => {
+      const c = hexToRgb(hex) ?? { r: 0, g: 0, b: 0 };
+      return [c.r / 255, c.g / 255, c.b / 255];
+    };
+    const inkSrgb = new Float32Array(MAX_INKS * 3);
+    setup.inks.forEach((ink, i) => inkSrgb.set(srgb(ink.hex), i * 3));
+    return { uTable: tableData, uInkCount: table.inkCount, uPaperSrgb: srgb(setup.paper), uInkSrgb: inkSrgb };
+  }
+
+  private runMix(settings: ProjectSettings): boolean {
+    const visible = this.visible(settings);
+    const tableKey = JSON.stringify(inkSetupFrom(settings));
+    return this.stage("mix", `${tableKey}|${visible}|${this.version("layerOptions")}`, () => {
+      this.mixPass(this.inputs!.inkUniforms, visible, this.main.layered!, this.working!, this.main);
     });
+  }
+
+  private mixPass(inkUniforms: Record<string, UniformValue>, visible: number[], cov: Target, image: Target, t: PassTargets): Target {
+    t.mixed = this.gpu.ensureTarget(t.mixed, cov.width, cov.height, "image", { mipmaps: true });
+    this.gpu.pass(MIX, t.mixed, {
+      ...inkUniforms,
+      uCoverage: { texture: cov.texture },
+      uImage: { texture: image.texture },
+      uVisible: visible,
+      uSize: [cov.width, cov.height],
+    });
+    this.gpu.generateMipmaps(t.mixed);
+    return t.mixed;
+  }
+
+  // ---- halftone: None shows the mixed texture; AM/FM go through the compositor ----
+
+  private runHalftone(settings: ProjectSettings, imageWidth: number, imageHeight: number): boolean {
+    const method = halftoneMethod(settings.halftone.type);
+    const scale = outputScale(settings, imageWidth);
+    if (!method) {
+      return this.stage("halftone", `none|${this.version("mix")}`, () => {
+        this.halftoned = false;
+        this.showMixed();
+      });
+    }
+
+    const values = (settings as unknown as Record<string, Record<string, unknown>>)[method.section.id] as never;
+    let prepared: unknown;
+    let preparedId = 0;
+    if (method.prepare && method.prepareKey) {
+      const pkey = `${method.id}|${method.prepareKey(values)}`;
+      if (this.halftonePrepared?.key !== pkey && this.halftonePreparing !== pkey) this.startHalftonePrepare(pkey, method, values);
+      if (!this.halftonePrepared || this.halftonePrepared.methodId !== method.id) {
+        // Nothing to show yet for this method: show smooth inks meanwhile.
+        this.halftoned = false;
+        this.showMixed();
+        return true;
+      }
+      prepared = this.halftonePrepared.value;
+      preparedId = this.halftonePrepared.id;
+    }
+
+    const n = settings.palette.inkCount;
+    const ctx: HalftoneContext = {
+      gpu: this.gpu,
+      inkCount: n,
+      minDot: settings.halftone.minDot.slice(0, MAX_INKS),
+      minDotMode: settings.halftone.minDotMode as "drop" | "round",
+      analysis: () => this.analysis(),
+    };
+    const key = [method.id, JSON.stringify(values), JSON.stringify(settings.halftone), scale, preparedId, this.version("mix")].join("|");
+    return this.stage("halftone", key, () => {
+      this.halftoned = true;
+      this.clearDetail();
+      this.compositor.set({
+        method,
+        methodUniforms: method.uniforms(values, ctx, prepared as never),
+        inkUniforms: this.inputs!.inkUniforms,
+        coverage: this.main.layered!,
+        image: this.working!,
+        imageWidth,
+        imageHeight,
+        outputScale: scale,
+        visible: this.inputs!.visible,
+        background: this.host.background,
+      });
+      this.host.preview.setSource("inks", this.compositor);
+    });
+  }
+
+  private startHalftonePrepare(pkey: string, method: HalftoneMethod, values: never): void {
+    this.halftonePreparing = pkey;
+    this.setBusy("halftone", "Building blue noise map…");
+    method.prepare!(values)
+      .then((value) => {
+        if (this.halftonePreparing !== pkey) return;
+        this.halftonePrepared = { key: pkey, methodId: method.id, value, id: ++this.preparedCount };
+        this.halftonePreparing = null;
+        this.setBusy("halftone", null);
+        this.schedule();
+      })
+      .catch((err: unknown) => {
+        if (!(err instanceof SupersededError)) console.error(err);
+        if (this.halftonePreparing === pkey) {
+          this.halftonePreparing = null;
+          this.setBusy("halftone", null);
+        }
+      });
+  }
+
+  private showMixed(): void {
+    const mixed = this.main.mixed;
+    if (!mixed) return;
+    this.host.preview.setSource("inks", { kind: "texture", texture: mixed.texture, textureWidth: mixed.width, detail: this.detail });
+  }
+
+  // ---- detail: full-resolution render of the visible area (halftone None, large images) ----
+
+  private clearDetail(): void {
+    if (!this.detail) return;
+    this.detail = null;
+    for (const key of Object.keys(this.detailTargets) as (keyof PassTargets)[]) {
+      const t = this.detailTargets[key];
+      if (t) this.gpu.deleteTarget(t);
+      this.detailTargets[key] = null;
+    }
+    if (this.detailSource) this.gpu.deleteTarget(this.detailSource);
+    this.detailSource = null;
+    if (!this.halftoned) this.showMixed();
+  }
+
+  /**
+   * Re-renders the visible area at full resolution when the working copy is
+   * too coarse for the current zoom. Called after each run and when the view
+   * settles after zooming or panning.
+   */
+  renderDetail(): void {
+    const image = this.host.source.get();
+    const inputs = this.inputs;
+    if (!image || !inputs || !this.working || !this.sourceTexture || this.halftoned) return;
+
+    const view = this.host.preview.currentView;
+    const canvas = this.host.preview.canvasSize;
+    const W = image.width;
+    const H = image.height;
+    const workingScale = this.working.width / W;
+    const sourceScale = this.sourceTextureWidth / W;
+    // Only when zoomed in beyond the working copy, and more resolution exists.
+    if (view.scale <= workingScale * 1.05 || sourceScale <= workingScale * 1.01) {
+      this.clearDetail();
+      return;
+    }
+
+    const t0 = performance.now();
+    const a = inputs.adjust;
+    const sigmaImage = (a.smoothing * Math.max(W, H)) / 1000;
+    const margin = a.smoothing > 0 ? Math.ceil(sigmaImage * 2.5) + 2 : 2;
+    const x0 = Math.max(0, Math.floor(-view.originX / view.scale - margin));
+    const y0 = Math.max(0, Math.floor(-view.originY / view.scale - margin));
+    const x1 = Math.min(W, Math.ceil((canvas.width - view.originX) / view.scale + margin));
+    const y1 = Math.min(H, Math.ceil((canvas.height - view.originY) / view.scale + margin));
+    if (x1 <= x0 || y1 <= y0) {
+      this.clearDetail();
+      return;
+    }
+    const rw = x1 - x0;
+    const rh = y1 - y0;
+    let texelScale = Math.min(view.scale, sourceScale);
+    if (rw * rh * texelScale * texelScale > MAX_DETAIL_PIXELS) texelScale = Math.sqrt(MAX_DETAIL_PIXELS / (rw * rh));
+    const w = Math.max(1, Math.round(rw * texelScale));
+    const h = Math.max(1, Math.round(rh * texelScale));
+
+    this.detailSource = this.gpu.ensureTarget(this.detailSource, w, h, "image");
+    this.gpu.pass(COPY, this.detailSource, {
+      uImage: { texture: this.sourceTexture },
+      uRatio: [(this.sourceTextureWidth * (rw / W)) / w, (this.sourceTextureWidth * (H / W) * (rh / H)) / h],
+      uRegion: [x0 / W, y0 / H, rw / W, rh / H],
+      uSize: [w, h],
+    });
+    const t = this.detailTargets;
+    const adjusted = this.adjustPasses(a, this.detailSource, t, sigmaImage * (w / rw));
+    const coverage = this.splitPass(inputs, adjusted, t);
+    const layered = this.layersPass(inputs.layerUniforms, coverage, t);
+    const mixed = this.mixPass(inputs.inkUniforms, inputs.visible, layered, this.detailSource, t);
+    this.detail = { texture: mixed.texture, x: x0, y: y0, width: rw, height: rh };
+    this.showMixed();
+    if (this.host.debug) console.debug(`[pipeline] detail ${w}×${h} ${(performance.now() - t0).toFixed(1)}ms`);
   }
 }

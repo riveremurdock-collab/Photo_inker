@@ -96,13 +96,14 @@ interface SplitMethod<Sec extends SectionSchema, P> {
   render(ctx, image: Target, out: Target, values, prepared?: P): void;  // GPU pass → coverage
 }
 
-// src/plugins/halftone/types.ts
-interface HalftoneMethod<S> {
-  id: string; label: string; family: "none" | "am" | "fm";
-  schema: SettingDef[];          // whole-image settings
-  perInkSchema: SettingDef[];    // size, angle, density… stored per ink
-  prepare?(analysis: ImageAnalysis, settings: S, ctx): Promise<void>;  // shared whole-image analysis
-  render(coverage: CoverageSet, settings: S, ctx): Promise<CoverageSet>;
+// src/plugins/halftone/types.ts (as built in Step 5)
+interface HalftoneMethod<Sec extends SectionSchema, P> {
+  id: string; label: string;
+  section: Sec;                    // its settings (parent "halftone"); per-ink ones use perInk
+  glsl: string;                    // defines htSamplePoint(ink, p) and htInk(ink, p, coverage)
+  prepareKey?(values): string;     // optional worker job (e.g. a threshold map), cached by key
+  prepare?(values): Promise<P>;
+  uniforms(values, ctx: HalftoneContext, prepared?: P): Record<string, UniformValue>;
 }
 ```
 
@@ -114,7 +115,7 @@ interface HalftoneMethod<S> {
   - **Tone Map** (`toneMap.ts` + `toneCurves.ts`): bands are turned into one 256-entry curve per ink on the CPU (the engine Advanced mode will reuse), and a GPU pass applies them by pixel lightness.
 - `SplitContext` carries the GPU, inks, paper, and overlap table, so Ink Matching solves against exactly what the preview shows.
 - **Detail Split (Step 8)** calls another registered `SplitMethod` for its base layers.
-- **Whole-image analysis (luminance, and later edges and structure)** is computed once per adjusted image and passed to `prepare`, so every layer's halftone is built from the same data.
+- **Whole-image analysis.** Luminance and Sobel gradient are computed once per adjusted image, lazily, through `HalftoneContext.analysis()`, and shared by every layer. The basic AM/FM types don't need it; structure-aware types will.
 - **Minimum dot size and drop-out/round-up** are shared halftone settings, applied by the halftone stage around the plugin rather than by each plugin.
 
 ## 5. Pipeline
@@ -156,7 +157,12 @@ upload → fadeBorder → adjust → split → layerOptions → halftone → bor
 - **Resolution.**
   - The pipeline runs on a working copy at full image resolution, capped at 4096 px on the long edge. Larger images are downscaled once with a 4×4 area filter in linear light. The mixed output is shown through mipmaps, so at any zoom the inked view is as sharp as the original, up to that resolution.
   - The "Original" view shows the full-size texture (up to 8192 px).
-  - Full-resolution processing at 100%+ zoom and for export comes with halftoning (Step 5) and export (Step 6).
+  - **Halftoned views (Step 5).** `pipeline/compositor.ts` draws AM/FM halftones straight into the canvas for the current view.
+    - Each screen pixel takes up to 8×8 jittered samples. At each sample, every ink's halftone code decides at exact output resolution whether that point is inked, and the ink combination is looked up in the overlap table.
+    - Samples are averaged in linear light, so zoomed-out views show the true average tone of the dots (measured ΔE ≤ 1 against smooth coverage for AM), and zoomed-in views show crisp, anti-aliased dots.
+    - Only 3×3 samples are used while zooming or panning, then full quality once the view settles.
+  - **Detail renders (halftone None, images over 4096 px).** When zoomed in beyond the working copy, the same passes (copy → adjust → split → layers → mix) re-run for just the visible area at full source resolution, after the view settles, and are drawn over the base texture.
+  - **Output size.** Halftone sizes are in output pixels. `app/output.ts` gives output px per image px from the Export settings: Digital = Original / 2× / custom width; Print = print width × DPI.
   - Full-resolution export processes **tiles** with an overlap margin wide enough for kernel stages (smoothing, trapping, blur). Whole-image algorithms that can't tile, such as error diffusion, run in a worker on the full coverage map, stored as 8-bit to save memory.
 - **Debug log.** A debug flag (`?debug` in the URL) logs which stages reran and how long each took.
 

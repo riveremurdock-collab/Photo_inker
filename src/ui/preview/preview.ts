@@ -25,7 +25,12 @@ export interface PreviewOptions {
   background: [number, number, number];
   onFilesDropped: (files: FileList) => void;
   onViewChange?: (scale: number) => void;
+  /** Called shortly after zooming/panning stops. */
+  onViewSettled?: () => void;
 }
+
+/** How long after the last zoom/pan the view counts as settled. */
+const SETTLE_DELAY_MS = 160;
 
 export class Preview {
   readonly element: HTMLElement;
@@ -43,6 +48,8 @@ export class Preview {
   /** While true, resizing the window refits the image. Cleared by any manual zoom or pan. */
   private fitted = true;
   private frameRequested = false;
+  private interacting = false;
+  private settleTimer: ReturnType<typeof setTimeout> | null = null;
   private pointers = new Map<number, { x: number; y: number }>();
   private pickHandler: PickHandler | null = null;
   private pressStart: { x: number; y: number; moved: boolean } | null = null;
@@ -244,7 +251,26 @@ export class Preview {
   private changed(): void {
     this.zoomLabel.textContent = `${Math.round(this.view.scale * 100)}%`;
     this.options.onViewChange?.(this.view.scale);
+    // While zooming/panning, draw at fast quality; redraw at full quality once it stops.
+    this.interacting = true;
+    if (this.settleTimer !== null) clearTimeout(this.settleTimer);
+    this.settleTimer = setTimeout(() => {
+      this.settleTimer = null;
+      this.interacting = false;
+      this.requestRender();
+      this.options.onViewSettled?.();
+    }, SETTLE_DELAY_MS);
     this.requestRender();
+  }
+
+  /** Current view: device px per image px, and where the image's top-left corner is. */
+  get currentView(): ViewTransform {
+    return { ...this.view };
+  }
+
+  /** Canvas size in device pixels. */
+  get canvasSize(): { width: number; height: number } {
+    return { width: this.canvas.width, height: this.canvas.height };
   }
 
   requestRender(): void {
@@ -252,7 +278,7 @@ export class Preview {
     this.frameRequested = true;
     requestAnimationFrame(() => {
       this.frameRequested = false;
-      this.renderer.render(this.view, this.imageWidth, this.imageHeight);
+      this.renderer.render(this.view, this.imageWidth, this.imageHeight, this.interacting ? "fast" : "full");
     });
   }
 

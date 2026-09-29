@@ -14,6 +14,7 @@ import { InkTestView } from "./ui/inkTestView";
 import { Pipeline } from "./pipeline/pipeline";
 import { createLayersBlock } from "./ui/sections/layers";
 import { createToneMapBlock } from "./ui/sections/toneMap";
+import { createAmBlock } from "./ui/sections/halftone";
 
 const DEBUG = new URLSearchParams(location.search).has("debug");
 
@@ -92,11 +93,13 @@ function start(root: HTMLElement): void {
   }
 
   // ---- Preview ----
+  let pipelineRef: Pipeline | null = null;
   let preview: Preview;
   try {
     preview = new Preview({
       background: PREVIEW_BACKGROUND,
       onFilesDropped: (files) => void handleFiles(files),
+      onViewSettled: () => pipelineRef?.renderDetail(),
       onViewChange: (scale) => {
         zoomPercent = Math.round(scale * 100);
         updateStatus();
@@ -144,7 +147,8 @@ function start(root: HTMLElement): void {
   showPaper();
 
   // ---- Pipeline (processing runs on the preview canvas GPU context) ----
-  const pipeline = new Pipeline({ settings, source, preview, debug: DEBUG });
+  const pipeline = new Pipeline({ settings, source, preview, background: PREVIEW_BACKGROUND, debug: DEBUG });
+  pipelineRef = pipeline;
   pipeline.onBusy((message) => {
     busyMessage = message;
     updateStatus();
@@ -156,6 +160,7 @@ function start(root: HTMLElement): void {
     palette: paletteBlock,
     splitToneMap: createToneMapBlock(settings, pipeline),
     layers: createLayersBlock(settings, palette),
+    halftoneAm: createAmBlock(settings),
   });
 
   const main = document.createElement("main");

@@ -9,8 +9,8 @@
 | 2 | Palette (basic) | ✅ Done |
 | 3 | Rendering engine core | ✅ Done |
 | 4 | Image adjustments, color splitting (basic), shared layer options | ✅ Done |
-| 5 | Halftone (basic) | ⏳ Next |
-| 6 | Export (basic) | — |
+| 5 | Halftone (basic) | ✅ Done |
+| 6 | Export (basic) | ⏳ Next |
 | — | *End of basic build: overall report* | — |
 | 7 | Full palette options | — |
 | 8 | Remaining color splitting methods | — |
@@ -131,6 +131,26 @@
   - Solo/mute affect only the preview (stage `mix`).
   - Invert is applied before density.
 - **Transparency:** transparent image areas get no ink.
+
+### Step 5
+- **Halftone preview:** drawn per view by a compositor, not rendered to a texture (see ARCHITECTURE §5). Dots are exact at output resolution at every zoom, with linear-light averaging when zoomed out. Measured on flat patches: AM vs smooth ΔE ≤ 0.9, FM ΔE ≤ 2.3.
+- **Output size settings pulled forward from Step 6/13:** Digital "Output size" (Original / 2× / Custom width) and Print "Print width" (in) + DPI. Halftone sizes are in output pixels.
+- **Defaults:** halftone type AM square grid; cell 8 px (75 LPI at 600 DPI); angles 15°/75°/0°/45° by print order; round (Euclidean) dots; max dot 100%; minimum dot 1.5 px (the stipple tool's riso-safe value) with Drop.
+- **AM dot shapes:** round (Euclidean), square, ellipse, diamond, line. Each shape becomes a rank table over the cell, so a dot's area always equals the tone exactly.
+- **Dot size curve:** global (one curve for all inks). Cell size, angle, and max dot are per ink.
+- **Minimum dot (AM):** a tone whose dot would be smaller than a round dot of the minimum diameter is dropped. With Round up, tones above 2% become the minimum dot.
+- **Minimum dot (FM):** raises the FM dot size to at least the minimum.
+- **FM blue noise:**
+  - Void-and-cluster maps are built in a worker using segment trees: 128² ≈ 0.3 s, 256² ≈ 0.8 s here. They are cached per size/spread.
+  - The seed changes each ink's offset into the map (not the map itself), so layers are placed independently and re-rolling is instant.
+- **FM round dots:**
+  - Radius √2/2 cells, so neighbors merge into solid ink.
+  - Because they overlap, the actual coverage at each density is measured on the map when it's built, and inverted into a tone-correction curve.
+- **Whole-image analysis:** luminance + gradient, computed lazily and shared by all layers. Not used by AM/FM yet.
+- **Full-resolution detail:** for None on images larger than 4096 px, the visible area is re-rendered at full resolution when zoomed in (after the view settles).
+- **Ink Matching fixes found while testing:**
+  - Compress mode now matches relative to the paper, so image white = bare paper. Before, a neutral white on warm paper got faint blue dots to "correct" the paper's tint.
+  - The white entry of the lookup table is kept exactly as solved, so smoothing can't leak ink into it.
 
 ## Open questions
 

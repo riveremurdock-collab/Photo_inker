@@ -52,7 +52,7 @@ export const inkMatchingSection = defineSection({
         { value: "compress", label: "Compress" },
         { value: "clip", label: "Clip" },
       ],
-      help: "Compress fits the image's full light-to-dark range into what the inks can print, keeping shadow detail. Clip uses the closest match for each color.",
+      help: "Compress matches colors relative to the paper (white in the image stays bare paper) and fits the full light-to-dark range into what the inks can print, keeping shadow detail. Clip matches exact colors, using the closest mix for each.",
     },
     {
       kind: "number",

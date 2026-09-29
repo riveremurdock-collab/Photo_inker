@@ -19,8 +19,9 @@ out vec4 outColor;
 export const COPY = /* glsl */ `${HEADER}
 uniform sampler2D uImage;
 uniform vec2 uRatio;   // source texels per output pixel (x, y); 1 = same size
+uniform vec4 uRegion;  // part of the source to copy, in source uv: x, y, width, height
 void main() {
-  vec2 uv = gl_FragCoord.xy / uSize;
+  vec2 uv = uRegion.xy + gl_FragCoord.xy / uSize * uRegion.zw;
   if (uRatio.x <= 1.0 && uRatio.y <= 1.0) {
     outColor = textureLod(uImage, uv, 0.0);
     return;
@@ -126,5 +127,25 @@ ${GLSL_LIGHTNESS}
 void main() {
   vec4 t = texture(uImage, gl_FragCoord.xy / uSize);
   outColor = vec4(clamp(lightness(t.rgb, uSource), 0.0, 1.0), 0.0, 0.0, t.a);
+}
+`;
+
+/**
+ * Whole-image analysis shared by every ink layer's halftone: luminance in r,
+ * and the luminance gradient (Sobel) in g and b, stored as 0.5 + gradient.
+ * Computed only when a halftone type asks for it.
+ */
+export const ANALYSIS = /* glsl */ `${HEADER}
+uniform sampler2D uImage;
+float lum(vec2 uv) { return dot(texture(uImage, uv).rgb, vec3(0.2126, 0.7152, 0.0722)); }
+void main() {
+  vec2 px = 1.0 / uSize;
+  vec2 uv = gl_FragCoord.xy * px;
+  float tl = lum(uv + px * vec2(-1.0, -1.0)), t = lum(uv + px * vec2(0.0, -1.0)), tr = lum(uv + px * vec2(1.0, -1.0));
+  float l = lum(uv + px * vec2(-1.0, 0.0)), r = lum(uv + px * vec2(1.0, 0.0));
+  float bl = lum(uv + px * vec2(-1.0, 1.0)), b = lum(uv + px * vec2(0.0, 1.0)), br = lum(uv + px * vec2(1.0, 1.0));
+  float gx = (tr + 2.0 * r + br) - (tl + 2.0 * l + bl);
+  float gy = (bl + 2.0 * b + br) - (tl + 2.0 * t + tr);
+  outColor = vec4(lum(uv), clamp(0.5 + gx * 0.5, 0.0, 1.0), clamp(0.5 + gy * 0.5, 0.0, 1.0), 1.0);
 }
 `;
