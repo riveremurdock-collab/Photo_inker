@@ -17,6 +17,16 @@ export interface SplitContext {
   paper: string;
   /** Solid overlap colors from the spectral ink model. */
   table: OverlapTable;
+  /** Values of any settings section (Detail Split uses it to run its base method). */
+  settingsOf(sectionId: string): Record<string, unknown>;
+  /** Long edge of the whole image, in image px. */
+  imageLongEdge: number;
+  /**
+   * Texels of the input per image px. Radii given relative to the image stay
+   * the same size whether the method runs on the preview's working copy, a
+   * zoomed-in detail region, or an export tile.
+   */
+  texelScale: number;
 }
 
 export type PrepareQuality = "draft" | "final";
@@ -37,11 +47,23 @@ export interface SplitMethod<Sec extends SectionSchema = SectionSchema, P = unkn
    * The pipeline asks for a quick "draft" first, shows it, then a "final".
    */
   prepare?(values: SectionValues<Sec>, ctx: SplitContext, quality: PrepareQuality): Promise<P>;
+  /** True if prepare() has work to do for these settings (default: prepare exists). */
+  needsPrepare?(values: SectionValues<Sec>, ctx: SplitContext): boolean;
   /** GPU pass: adjusted image (linear light) → ink coverage (one ink per channel). */
   render(ctx: SplitContext, image: Target, out: Target, values: SectionValues<Sec>, prepared: P | undefined): void;
+  /**
+   * How far (in image px) the result at a pixel depends on neighboring pixels,
+   * e.g. a blur radius. Tiles and detail regions add this as a margin.
+   */
+  reach?(values: SectionValues<Sec>, ctx: SplitContext): number;
+  /**
+   * Optional preview-only view (e.g. a selection mask): when it returns an
+   * image, the preview shows that instead of the inks. Never used for export.
+   */
+  previewOverride?(ctx: SplitContext, image: Target, out: Target, values: SectionValues<Sec>): boolean;
 }
 
-/** Erases a method's specific types so methods can sit in one list. */
+/** Keeps a method's specific types while it's being defined. */
 export function defineSplitMethod<Sec extends SectionSchema, P>(method: SplitMethod<Sec, P>): SplitMethod<Sec, P> {
   return method;
 }

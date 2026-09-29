@@ -97,7 +97,8 @@ async function renderTiles(
   const scale = plan.width / state.imageWidth; // output px per image px
   const texelScale = Math.min(state.sourceScale, scale);
   const sigmaImage = (state.smoothing * Math.max(state.imageWidth, state.imageHeight)) / 1000;
-  const margin = (state.halftone ? state.halftone.reach / scale : 0) + (state.smoothing > 0 ? sigmaImage * 2.5 : 0) + 2;
+  const margin =
+    (state.halftone ? state.halftone.reach / scale : 0) + (state.smoothing > 0 ? sigmaImage * 2.5 : 0) + state.splitReach + 2;
   const shader = state.halftone ? halftoneExportShader(state.halftone.method.glsl) : SMOOTH_EXPORT;
 
   const targets = emptyRegionTargets();

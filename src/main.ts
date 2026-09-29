@@ -16,6 +16,8 @@ import { createLayersBlock } from "./ui/sections/layers";
 import { createToneMapBlock } from "./ui/sections/toneMap";
 import { createAmBlock } from "./ui/sections/halftone";
 import { createExportBlock } from "./ui/sections/export";
+import { createChannelSplitBlock } from "./ui/sections/channelSplit";
+import { createSelectiveColorBlock } from "./ui/sections/selectiveColor";
 
 const DEBUG = new URLSearchParams(location.search).has("debug");
 
@@ -121,7 +123,11 @@ function start(root: HTMLElement): void {
   const eyedropper = new Eyedropper(
     preview,
     () => source.get()?.bitmap ?? null,
-    (target, hex) => (target.kind === "ink" ? palette.setInkColor(target.slot, hex) : palette.setPaper(hex)),
+    (target, hex) => {
+      if (target.kind === "ink") palette.setInkColor(target.slot, hex);
+      else if (target.kind === "paper") palette.setPaper(hex);
+      else target.onPick(hex);
+    },
   );
   const paletteBlock = createPaletteBlock(settings, source, palette, eyedropper);
 
@@ -162,6 +168,8 @@ function start(root: HTMLElement): void {
     splitToneMap: createToneMapBlock(settings, pipeline),
     layers: createLayersBlock(settings, palette),
     halftoneAm: createAmBlock(settings),
+    splitChannel: createChannelSplitBlock(settings),
+    splitSelective: createSelectiveColorBlock(settings, source, eyedropper),
   }, {
     export: createExportBlock(settings, source, pipeline),
   });

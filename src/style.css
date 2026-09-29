@@ -1057,3 +1057,86 @@ input.swatch-input {
   line-height: 16px;
   font-size: 11px;
 }
+
+/* ---- Step 8: Tone Map curves, Channel Split, Selective Color ---- */
+
+.tone-curves,
+.tone-curve-rows,
+.channel-block,
+.channel-body,
+.selective-block,
+.selective-cards {
+  display: grid;
+  gap: 10px;
+}
+
+.tone-curve-row,
+.channel-card {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--color-light-sage);
+}
+
+.tone-curve-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tone-curve-head select {
+  max-width: 150px;
+}
+
+.channel-card h4 {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-olive);
+}
+
+/* Hue slider: a rainbow track so the hue center is easy to find. */
+.hue-control input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(to right, hsl(0 80% 55%), hsl(60 80% 55%), hsl(120 80% 45%), hsl(180 80% 45%), hsl(240 80% 60%), hsl(300 80% 55%), hsl(360 80% 55%));
+}
+
+.hue-control input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--color-black-grey);
+}
+
+.hue-control input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--color-black-grey);
+}
+
+.hue-control input[type="range"]::-moz-range-track {
+  background: transparent;
+}
+
+.icon-text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.icon-text-button.active {
+  background: var(--color-orange);
+  border-color: var(--color-dark-sandstone);
+  color: #fff;
+}

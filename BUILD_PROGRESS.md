@@ -13,8 +13,8 @@
 | 6 | Export (basic) | ✅ Done |
 | — | *End of basic build: overall report* | ✅ Given 2026-09-29 |
 | 7 | Full palette options | ✅ Done |
-| 8 | Remaining color splitting methods | ⏳ Next |
-| 9 | Complete shared layer options | — |
+| 8 | Remaining color splitting methods | ✅ Done |
+| 9 | Complete shared layer options | ⏳ Next |
 | 10 | Remaining halftone types | — |
 | 11 | Border | — |
 | 12 | Print simulation | — |
@@ -184,6 +184,34 @@
   - The lightest scheme color other than the first takes the background slot, so the scheme gives one fewer ink.
   - Because hue-rotated colors share the first color's lightness, that slot becomes a pale paper tint of the color (OKLCH L 0.95, gentle chroma), not the mid-tone itself. A mid-tone paper would bury the inks.
   - Turning the option off restores the previous paper.
+
+### Step 8
+- **Plugin context:** split methods now get `settingsOf(sectionId)`, `imageLongEdge`, and `texelScale` (so radii are resolution-independent across preview, zoom detail, and export tiles).
+  - They can declare `reach()` (an extra margin for tiles/regions) and `needsPrepare()`.
+  - They can offer a preview-only `previewOverride()` (used for masks; never exported).
+- **Tone Map Advanced:**
+  - One curve per ink (a per-ink curve setting), edited in a custom block with a preset menu per ink: Shadow ink, Midtone ink, Highlight tint, Full range, Off.
+  - Switching Simple → Advanced turns the current bands into curves (sampled, then simplified with Douglas–Peucker at tolerance 0.01). The image doesn't change: measured mean difference 0.3/255.
+  - **Link curves:** dragging a point on one curve moves the nearest interior point (or the same end point) of every other ink's curve by the same amount. Adding and removing points isn't linked.
+  - The live strip works in both modes; the histogram and bands show only in Simple.
+- **Channel Split:**
+  - Color spaces: RGB (inverted), CMYK with black generation (0–100%, GCR-style), Lab (L inverted; a/b split into ± halves, scaled by 90), HSL, and YCbCr (Cb/Cr split optional).
+  - Each channel routes to an ink or is dropped, with intensity (gain, clipped) and opacity (maximum contribution).
+  - Merged channels combine by Add, Max, Average, or Screen.
+  - The advanced mixer matrix (per ink: weight per channel + offset) starts from the current routing when turned on, so the image doesn't jump.
+  - Doesn't depend on ink colors.
+- **Selective Color:**
+  - Up to 6 ranges: hue center/width, saturation and lightness limits, feather (hue fade up to 60°, sat/light fade up to 0.25), and an ink. Membership is computed in HSL from sRGB.
+  - Density source: saturation, darkness, or constant.
+  - The base ink ("auto" = darkest) prints everything outside the ranges as grayscale.
+  - "Add range from image" and per-range eyedroppers set the hue and ±35% saturation/lightness limits.
+  - The per-range mask preview is preview only.
+- **Detail Split:**
+  - A Gaussian blur (radius in thousandths of the long edge) makes the base; the base method runs on it with its own settings, and its worker job (e.g. Ink Matching's lookup table) is reused.
+  - Detail is one of: high-pass (blur − sharp luma, ×contrast×8, − threshold), line art (thresholded high-pass), or edges (Sobel).
+  - The detail is screened onto the detail ink ("auto" = darkest).
+  - Export tiles add the blur radius as margin.
+- **Eyedropper:** now supports custom targets (used by Selective Color).
 
 ## Open questions
 

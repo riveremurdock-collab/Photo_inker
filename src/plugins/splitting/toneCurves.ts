@@ -1,10 +1,64 @@
 // Tone Map curve engine: every Tone Map result is one curve per ink, mapping
 // lightness (0 = black, 1 = white) to ink density. Simple mode (bands) is a
-// preset that builds these curves; Advanced mode (Step 8) will edit them
-// directly, so switching modes shows the bands as curves.
+// preset that builds these curves; Advanced mode edits them directly, so
+// switching modes shows the bands as curves.
 
 import { hexToRgb, rgbToLab } from "../../util/color";
+import { sampleCurve, type CurvePoint } from "../../util/curve";
 import { MAX_INKS } from "../../pipeline/coverage";
+
+/** Named starting points for an ink's curve in Advanced mode (x = lightness, y = density). */
+export const CURVE_PRESETS: readonly { id: string; label: string; points: [number, number][] }[] = [
+  { id: "shadow", label: "Shadow ink", points: [[0, 1], [0.3, 0.85], [0.6, 0.15], [0.8, 0], [1, 0]] },
+  { id: "midtone", label: "Midtone ink", points: [[0, 0.15], [0.25, 0.6], [0.5, 0.85], [0.75, 0.35], [1, 0]] },
+  { id: "highlight", label: "Highlight tint", points: [[0, 0.25], [0.6, 0.35], [0.9, 0.1], [1, 0]] },
+  { id: "full", label: "Full range", points: [[0, 1], [1, 0]] },
+  { id: "off", label: "Off", points: [[0, 0], [1, 0]] },
+];
+
+/** Per-ink curves (Advanced mode) as interleaved densities, like bandsToCurves. */
+export function pointCurvesToCurves(curves: readonly (readonly CurvePoint[])[]): Float32Array {
+  const out = new Float32Array(CURVE_SIZE * MAX_INKS);
+  curves.slice(0, MAX_INKS).forEach((points, ink) => {
+    const samples = sampleCurve(points, CURVE_SIZE);
+    for (let i = 0; i < CURVE_SIZE; i++) out[i * MAX_INKS + ink] = samples[i]!;
+  });
+  return out;
+}
+
+/**
+ * Turns one ink's sampled curve into a few editable points (Douglas–Peucker
+ * simplification). Hard band edges survive as two points one step apart.
+ */
+export function curveToPoints(curves: Float32Array, ink: number, tolerance = 0.01): [number, number][] {
+  const pts: [number, number][] = [];
+  for (let i = 0; i < CURVE_SIZE; i++) pts.push([i / (CURVE_SIZE - 1), curves[i * MAX_INKS + ink]!]);
+  const keep = new Uint8Array(pts.length);
+  keep[0] = 1;
+  keep[pts.length - 1] = 1;
+  const stack: [number, number][] = [[0, pts.length - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop()!;
+    const [ax, ay] = pts[a]!;
+    const [bx, by] = pts[b]!;
+    let worst = -1;
+    let worstD = tolerance;
+    for (let i = a + 1; i < b; i++) {
+      const [x, y] = pts[i]!;
+      const t = (x - ax) / (bx - ax);
+      const d = Math.abs(y - (ay + t * (by - ay)));
+      if (d > worstD) {
+        worstD = d;
+        worst = i;
+      }
+    }
+    if (worst >= 0) {
+      keep[worst] = 1;
+      stack.push([a, worst], [worst, b]);
+    }
+  }
+  return pts.filter((_, i) => keep[i]).map(([x, y]) => [Math.round(x * 1000) / 1000, Math.round(y * 1000) / 1000]);
+}
 
 /** Curve resolution: lightness steps. */
 export const CURVE_SIZE = 256;

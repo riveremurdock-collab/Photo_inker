@@ -1,12 +1,14 @@
-// Tone Map (Simple mode): maps the image's lightness to ink density in bands
-// (e.g. shadows, midtones, highlights), each band assigned an ink, with overlap
-// zones blending neighboring bands. Bands become per-ink curves (toneCurves.ts),
-// and a GPU pass looks each pixel's lightness up in those curves.
+// Tone Map: maps the image's lightness to ink density.
+// - Simple mode: bands (e.g. shadows, midtones, highlights), each assigned an
+//   ink, with overlap zones blending neighboring bands.
+// - Advanced mode: one editable curve per ink, stacking like a duotone/tritone.
+// Both produce per-ink curves (toneCurves.ts); a GPU pass looks each pixel's
+// lightness up in those curves.
 
 import { LIGHTNESS_SOURCES, GLSL_LIGHTNESS, GLSL_LINEAR_TO_SRGB } from "../../engine/gl/program";
 import { MAX_INKS } from "../../pipeline/coverage";
 import { defineSection, type SectionValues } from "../../schema/types";
-import { bandsToCurves, CURVE_SIZE, resolveBandInks, type Falloff, type Fill } from "./toneCurves";
+import { bandsToCurves, CURVE_SIZE, pointCurvesToCurves, resolveBandInks, type Falloff, type Fill } from "./toneCurves";
 import { defineSplitMethod, type SplitContext } from "./types";
 
 const BAND_INK_OPTIONS = [
@@ -23,7 +25,7 @@ export const toneMapSection = defineSection({
   title: "Tone Map",
   stage: "split",
   parent: "split",
-  description: "Maps lightness to ink in bands, like shadows, midtones, and highlights. Good for graphic looks and duotones.",
+  description: "Maps lightness to ink: in bands (shadows, midtones, highlights) or with a curve per ink. Good for graphic looks and duotones.",
   visibleWhen: (s) => s.split?.method === "toneMap",
   settings: [
     {
@@ -41,7 +43,40 @@ export const toneMapSection = defineSection({
         { value: "min", label: "Min RGB" },
       ],
     },
-    { kind: "number", key: "bandCount", label: "Number of bands", default: 4, min: 1, max: 4, step: 1 },
+    // Mode and the Advanced curves are edited in the custom block (ui/sections/toneMap.ts).
+    {
+      kind: "select",
+      key: "mode",
+      label: "Mode",
+      default: "simple",
+      hidden: true,
+      options: [
+        { value: "simple", label: "Simple (bands)" },
+        { value: "advanced", label: "Advanced (curves)" },
+      ],
+    },
+    {
+      kind: "curve",
+      key: "inkCurve",
+      label: "Ink curve",
+      perInk: true,
+      default: [
+        [0, 1],
+        [1, 0],
+      ],
+      hidden: true,
+    },
+    { kind: "toggle", key: "linkCurves", label: "Link curves", default: false, hidden: true, stage: null },
+    {
+      kind: "number",
+      key: "bandCount",
+      label: "Number of bands",
+      default: 4,
+      min: 1,
+      max: 4,
+      step: 1,
+      visibleWhen: (s) => s.mode !== "advanced",
+    },
     // Band edges are dragged on the histogram (custom block), so they're hidden here.
     { kind: "number", key: "cutoff1", label: "Cutoff 1", default: 25, min: 0, max: 100, step: 0.5, hidden: true },
     { kind: "number", key: "cutoff2", label: "Cutoff 2", default: 50, min: 0, max: 100, step: 0.5, hidden: true },
@@ -59,7 +94,7 @@ export const toneMapSection = defineSection({
       max: 40,
       step: 0.5,
       unit: "%",
-      visibleWhen: (s) => Number(s.bandCount) >= 2,
+      visibleWhen: (s) => s.mode !== "advanced" && Number(s.bandCount) >= 2,
     },
     {
       kind: "number",
@@ -70,7 +105,7 @@ export const toneMapSection = defineSection({
       max: 40,
       step: 0.5,
       unit: "%",
-      visibleWhen: (s) => Number(s.bandCount) >= 3,
+      visibleWhen: (s) => s.mode !== "advanced" && Number(s.bandCount) >= 3,
     },
     {
       kind: "number",
@@ -81,7 +116,7 @@ export const toneMapSection = defineSection({
       max: 40,
       step: 0.5,
       unit: "%",
-      visibleWhen: (s) => Number(s.bandCount) >= 4,
+      visibleWhen: (s) => s.mode !== "advanced" && Number(s.bandCount) >= 4,
     },
     {
       kind: "select",
@@ -89,6 +124,7 @@ export const toneMapSection = defineSection({
       label: "Falloff",
       default: "smooth",
       display: "segmented",
+      visibleWhen: (s) => s.mode !== "advanced",
       options: [
         { value: "hard", label: "Hard" },
         { value: "linear", label: "Linear" },
@@ -101,6 +137,7 @@ export const toneMapSection = defineSection({
       label: "Fill inside each band",
       default: "flat",
       display: "segmented",
+      visibleWhen: (s) => s.mode !== "advanced",
       options: [
         { value: "flat", label: "Flat" },
         { value: "gradient", label: "Tonal gradient" },
@@ -115,7 +152,7 @@ export const toneMapSection = defineSection({
       max: 8,
       step: 1,
       help: "Steps within each band. 0 = smooth.",
-      visibleWhen: (s) => s.fill === "gradient",
+      visibleWhen: (s) => s.mode !== "advanced" && s.fill === "gradient",
     },
   ],
 });
@@ -138,7 +175,14 @@ export function toneMapCutoffs(values: ToneMapValues): number[] {
     .sort((a, b) => a - b);
 }
 
+/** The per-ink curves the current settings produce (from the bands in Simple mode, the edited curves in Advanced). */
 export function toneMapCurves(values: ToneMapValues, inkHexes: readonly string[]): Float32Array {
+  if (values.mode === "advanced") return pointCurvesToCurves(values.inkCurve.slice(0, inkHexes.length));
+  return toneMapBandCurves(values, inkHexes);
+}
+
+/** The curves the Simple-mode bands produce (also used to seed Advanced mode). */
+export function toneMapBandCurves(values: ToneMapValues, inkHexes: readonly string[]): Float32Array {
   return bandsToCurves({
     cutoffs: toneMapCutoffs(values),
     bandInks: toneMapBandInks(values, inkHexes),
@@ -192,9 +236,10 @@ export const toneMap = defineSplitMethod({
   id: "toneMap",
   label: "Tone Map",
   section: toneMapSection,
-  // Only "auto" band inks depend on the ink colors (their lightness order), so
-  // the result changes with ink colors only if the resolved band inks change.
-  dependsOn: (ctx, values) => toneMapBandInks(values, inkHexes(ctx)),
+  // Only Simple mode's "auto" band inks depend on the ink colors (their
+  // lightness order), so the result changes with ink colors only if the
+  // resolved band inks change. Advanced curves don't depend on ink colors.
+  dependsOn: (ctx, values) => (values.mode === "advanced" ? null : toneMapBandInks(values, inkHexes(ctx))),
   render(ctx, image, out, values) {
     const curves = toneMapCurves(values, inkHexes(ctx));
     const tex = uploadCurves(ctx.gpu.gl, curves);

@@ -6,13 +6,20 @@
 import { linearToSrgbChannel, rgbToHex, srgbToLinearChannel } from "../../util/color";
 import type { Preview } from "./preview";
 
-export type PickTarget = { kind: "ink"; slot: number } | { kind: "paper" };
+export type PickTarget =
+  | { kind: "ink"; slot: number }
+  | { kind: "paper" }
+  /** Anything else that wants a color from the image (e.g. a Selective Color range). */
+  | { kind: "custom"; id: string; onPick: (hex: string) => void };
 
 const SAMPLE_RADIUS = 1;
 
 export function sameTarget(a: PickTarget | null, b: PickTarget | null): boolean {
   if (!a || !b) return a === b;
-  return a.kind === b.kind && (a.kind === "paper" || a.slot === (b as { slot: number }).slot);
+  if (a.kind !== b.kind) return false;
+  if (a.kind === "ink") return a.slot === (b as { slot: number }).slot;
+  if (a.kind === "custom") return a.id === (b as { id: string }).id;
+  return true;
 }
 
 export class Eyedropper {

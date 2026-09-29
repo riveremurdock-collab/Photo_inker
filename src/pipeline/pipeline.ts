@@ -347,12 +347,17 @@ export class Pipeline {
 
   private splitContext(settings: ProjectSettings): SplitContext {
     const setup = inkSetupFrom(settings);
+    const image = this.host.source.get();
+    const all = settings as unknown as Record<string, Record<string, unknown>>;
     return {
       gpu: this.gpu,
       inkCount: settings.palette.inkCount,
       inks: setup.inks,
       paper: setup.paper,
       table: this.tables.get(setup),
+      settingsOf: (id) => all[id] ?? {},
+      imageLongEdge: image ? Math.max(image.width, image.height) : 1,
+      texelScale: image && this.working ? this.working.width / image.width : 1,
     };
   }
 
@@ -365,7 +370,8 @@ export class Pipeline {
 
     let preparedValue: unknown;
     let preparedId = 0;
-    if (method.prepare) {
+    const usesPrepare = !!method.prepare && (method.needsPrepare?.(values, ctx) ?? true);
+    if (usesPrepare) {
       const pkey = `${method.id}|${valuesKey}|${dependency}`;
       if (this.prepared?.key !== pkey && this.preparing !== pkey) this.startSplitPrepare(pkey, method, values, ctx);
       // Until the new result arrives, keep using the last one from this method
@@ -386,16 +392,23 @@ export class Pipeline {
       visible: this.visible(settings),
     };
 
-    const key = [method.id, valuesKey, method.prepare ? `prepared ${preparedId}` : dependency, ctx.inkCount, this.version("adjust")].join("|");
+    const key = [method.id, valuesKey, usesPrepare ? `prepared ${preparedId}` : dependency, ctx.inkCount, this.version("adjust")].join("|");
     return this.stage("split", key, () => {
       this.splitPass(this.inputs!, this.adjustOutput!, this.main);
     });
   }
 
-  private splitPass(inputs: PassInputs, src: Target, t: PassTargets): Target {
+  private splitPass(inputs: PassInputs, src: Target, t: PassTargets, texelScale?: number): Target {
     t.coverage = this.gpu.ensureTarget(t.coverage, src.width, src.height, "coverage");
-    inputs.method.render(inputs.ctx, src, t.coverage, inputs.values, inputs.prepared as never);
+    const ctx = texelScale === undefined ? inputs.ctx : { ...inputs.ctx, texelScale };
+    inputs.method.render(ctx, src, t.coverage, inputs.values, inputs.prepared as never);
     return t.coverage;
+  }
+
+  /** How far (image px) the current split method looks at neighbors (e.g. Detail Split's blur). */
+  private splitReach(): number {
+    const inputs = this.inputs;
+    return inputs?.method.reach ? inputs.method.reach(inputs.values, inputs.ctx) : 0;
   }
 
   private startSplitPrepare(pkey: string, method: SplitMethod, values: never, ctx: SplitContext): void {
@@ -506,7 +519,25 @@ export class Pipeline {
 
   // ---- halftone: None shows the mixed texture; AM/FM go through the compositor ----
 
+  private overrideTarget: Target | null = null;
+
+  /** Shows a split method's preview-only view instead of the inks, if it offers one right now. */
+  private runPreviewOverride(): boolean {
+    const inputs = this.inputs;
+    const src = this.adjustOutput;
+    if (!inputs?.method.previewOverride || !src) return false;
+    this.overrideTarget = this.gpu.ensureTarget(this.overrideTarget, src.width, src.height, "image", { mipmaps: true });
+    if (!inputs.method.previewOverride(inputs.ctx, src, this.overrideTarget, inputs.values)) return false;
+    this.gpu.generateMipmaps(this.overrideTarget);
+    this.halftoned = false;
+    this.keys.delete("halftone"); // so the inks come back when the override ends
+    this.clearDetail();
+    this.host.preview.setSource("inks", { kind: "texture", texture: this.overrideTarget.texture, textureWidth: src.width });
+    return true;
+  }
+
   private runHalftone(settings: ProjectSettings, imageWidth: number, imageHeight: number): boolean {
+    if (this.runPreviewOverride()) return true;
     const method = halftoneMethod(settings.halftone.type);
     const scale = outputScale(settings, imageWidth);
     if (!method) {
@@ -623,7 +654,7 @@ export class Pipeline {
     const t0 = performance.now();
     const a = inputs.adjust;
     const sigmaImage = (a.smoothing * Math.max(W, H)) / 1000;
-    const margin = a.smoothing > 0 ? Math.ceil(sigmaImage * 2.5) + 2 : 2;
+    const margin = (a.smoothing > 0 ? Math.ceil(sigmaImage * 2.5) : 0) + Math.ceil(this.splitReach()) + 2;
     const x0 = Math.max(0, Math.floor(-view.originX / view.scale - margin));
     const y0 = Math.max(0, Math.floor(-view.originY / view.scale - margin));
     const x1 = Math.min(W, Math.ceil((canvas.width - view.originX) / view.scale + margin));
@@ -677,7 +708,7 @@ export class Pipeline {
     const a = inputs.adjust;
     const sigmaImage = (a.smoothing * Math.max(W, H)) / 1000;
     const adjusted = this.adjustPasses(a, t.source, t, sigmaImage * (w / region.width));
-    const coverage = this.splitPass(inputs, adjusted, t);
+    const coverage = this.splitPass(inputs, adjusted, t, texelScale);
     const layered = this.layersPass(inputs.layerUniforms, coverage, t);
     const visible = options.visible ?? [1, 1, 1, 1];
     const mixed = options.mix ? this.mixPass(inputs.inkUniforms, visible, layered, t.source, t) : null;
@@ -710,6 +741,7 @@ export class Pipeline {
       inkCount: this.inputs.ctx.inkCount,
       inkUniforms: this.inputs.inkUniforms,
       smoothing: this.inputs.adjust.smoothing,
+      splitReach: this.splitReach(),
       halftone: this.halftoneState,
     };
   }
@@ -736,6 +768,8 @@ export interface ExportState {
   inkCount: number;
   inkUniforms: Record<string, UniformValue>;
   smoothing: number;
+  /** Extra margin (image px) the split method needs around a region. */
+  splitReach: number;
   /** Null for halftone None. reach = how far (output px) the halftone looks for coverage. */
   halftone: { method: HalftoneMethod; methodUniforms: Record<string, UniformValue>; reach: number } | null;
 }

@@ -8,9 +8,10 @@ import { mixCoverage } from "../../engine/spectral/inkModel";
 import { inkSetupFrom, OverlapTableCache } from "../../engine/spectral/overlapTable";
 import type { Pipeline } from "../../pipeline/pipeline";
 import { MAX_INKS } from "../../pipeline/coverage";
-import { CURVE_SIZE } from "../../plugins/splitting/toneCurves";
-import { toneMapBandInks, toneMapCurves } from "../../plugins/splitting/toneMap";
+import { CURVE_SIZE, curveToPoints } from "../../plugins/splitting/toneCurves";
+import { toneMapBandCurves, toneMapBandInks, toneMapCurves } from "../../plugins/splitting/toneMap";
 import { linearToSrgbChannel } from "../../util/color";
+import { createToneCurvesBlock } from "./toneCurves";
 
 const HIST_HEIGHT = 96;
 const STRIP_HEIGHT = 20;
@@ -48,7 +49,45 @@ export function createToneMapBlock(store: SettingsStore, pipeline: Pipeline): HT
   strip.setAttribute("aria-label", "Printed color at each tone, dark to light");
   const bands = document.createElement("div");
   bands.className = "tonemap-bands";
-  element.append(histLabel, hist, axis, stripLabel, strip, bands);
+
+  // Simple (bands) / Advanced (curves). Switching to Advanced turns the current
+  // bands into editable curves, so nothing changes until you edit them.
+  const modeRow = document.createElement("div");
+  modeRow.className = "control";
+  modeRow.innerHTML = `<span class="control-label">Mode</span>`;
+  const modeGroup = document.createElement("div");
+  modeGroup.className = "segmented";
+  const modeButtons = (
+    [
+      ["simple", "Simple (bands)"],
+      ["advanced", "Advanced (curves)"],
+    ] as const
+  ).map(([mode, label]) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = label;
+    b.dataset.value = mode;
+    b.addEventListener("click", () => setMode(mode));
+    modeGroup.append(b);
+    return b;
+  });
+  modeRow.append(modeGroup);
+  const advanced = createToneCurvesBlock(store);
+  const simpleParts = [histLabel, hist, axis, bands];
+
+  element.append(modeRow, histLabel, hist, axis, stripLabel, strip, bands, advanced);
+
+  function setMode(mode: "simple" | "advanced"): void {
+    const v = values();
+    if (mode === v.mode) return;
+    if (mode === "advanced") {
+      const hexes = inkHexes();
+      const sampled = toneMapBandCurves(v, hexes);
+      const curves = v.inkCurve.map((c, i) => (i < hexes.length ? curveToPoints(sampled, i) : c.map(([x, y]) => [x, y] as [number, number])));
+      store.setValue("splitToneMap", "inkCurve", curves);
+    }
+    store.setValue("splitToneMap", "mode", mode);
+  }
 
   let histogram: Uint32Array | null = null;
   let dragging: number | null = null;
@@ -184,9 +223,14 @@ export function createToneMapBlock(store: SettingsStore, pipeline: Pipeline): HT
   }
 
   function draw(): void {
+    const isAdvanced = values().mode === "advanced";
+    for (const b of modeButtons) b.classList.toggle("active", b.dataset.value === (isAdvanced ? "advanced" : "simple"));
+    for (const part of simpleParts) part.hidden = isAdvanced;
+    advanced.hidden = !isAdvanced;
     if (element.offsetParent === null) return; // hidden (another method chosen)
-    drawHistogram();
     drawStrip();
+    if (isAdvanced) return;
+    drawHistogram();
     drawBands();
   }
 
