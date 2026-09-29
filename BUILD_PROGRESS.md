@@ -6,8 +6,8 @@
 |---|---|---|
 | 0 | Setup and architecture | ✅ Done |
 | 1 | Upload, modes, and preview canvas | ✅ Done |
-| 2 | Palette (basic) | ⏳ Next |
-| 3 | Rendering engine core | — |
+| 2 | Palette (basic) | ✅ Done |
+| 3 | Rendering engine core | ⏳ Next |
 | 4 | Image adjustments, color splitting (basic), shared layer options | — |
 | 5 | Halftone (basic) | — |
 | 6 | Export (basic) | — |
@@ -51,8 +51,37 @@
   - Keys: 0 = fit, 1 = 100%, +/− zoom.
 - **Project name:** follows the uploaded file's name until the user types their own.
 - **Schema additions:** a `text` kind, a per-setting `stage` override (`null` = doesn't affect the preview), `visibleWhen`, and `display: "segmented"` for selects.
-- **Per-ink values:** always arrays of length 4. Per-ink controls are built in Step 2.
+- **Per-ink values:** always arrays of length 4.
 - **Sample settings:** so mode switching can be seen, Export has two real settings from the spec: Digital › Format (PNG/JPG) and Print › Resolution (600 DPI).
+
+### Step 2
+- **Storage:** inks are ordinary per-ink settings, stored in slots 0–3 with an `inkCount`. Slot order is print order.
+  - **Reorder:** reordering or removing an ink moves that slot's values in every per-ink setting in every section (`SettingsStore.permuteInks`), so each ink keeps its halftone angle, density, and other settings when it moves.
+  - **Remove:** a removed ink's settings go to the unused end slot.
+  - **Add:** a new ink's slot is reset to defaults and given the first standard color not already used.
+- **Defaults:** 3 inks (Blue #0078bf, Fluorescent Pink #ff48b0, Yellow #ffe800) on Natural paper (#f6f3ec). This is a riso CMY analog, so a color photo looks reasonable right away once splitting exists.
+- **Ink names:** used for export file names.
+  - They follow the color automatically: the matching Riso ink within ΔE 6, otherwise a plain hue name such as "Orange".
+  - Once the user types a name, it stays. Clearing it goes back to automatic naming.
+- **Presets:** 31 Riso ink presets and 7 paper presets. The hex values are approximate screen colors, not calibrated.
+- **Manual vs Auto:**
+  - Palette colors are either Manual or Auto.
+  - Auto recomputes on upload, ink count change, and the background toggle, plus paper change when the paper is kept.
+  - Editing an ink color by hand switches back to Manual and keeps the colors.
+- **Auto palette method:**
+  - k-means in Lab on a 160 px copy of the image, 4 restarts, deterministic (no randomness between runs).
+  - The kept paper is a fixed cluster, so inks aren't spent on paper-colored areas.
+  - Each ink is the average of the 30% of its cluster farthest from the paper, not the cluster mean. A solid ink is the strongest version of its color; the mean includes tints and looks muddy.
+  - Inks are sorted light to dark, so lighter inks print first.
+  - With "Pick the background from the image too", the lightest cluster becomes the paper.
+- **Eyedropper:**
+  - Averages a 3×3 pixel area in linear light, and shows a loupe with the hovered color.
+  - A click picks; a drag still pans. Escape cancels.
+  - It turns off after one pick.
+- **Reorder controls:** ▲/▼ buttons, not drag-and-drop. They are simpler and keyboard accessible.
+- **Paper label:** the paper row reads "Background" in Digital mode and "Paper" in Print mode.
+- **Transparent PNGs:** transparent areas show the paper color.
+- **Panel width:** widened to 370 px so ink names fit.
 
 ## Open questions
 

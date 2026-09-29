@@ -3,10 +3,12 @@
 // therefore which pipeline stage) changed.
 
 import type { StageId } from "../pipeline/stage";
-import { coerceValue, defaultProjectSettings, findSetting, stageFor } from "../schema/registry";
-import type { ProjectSettings } from "../schema/sections";
+import { coerceValue, defaultProjectSettings, findSetting, slotDefault, stageFor } from "../schema/registry";
+import { SECTIONS, type ProjectSettings } from "../schema/sections";
+import type { SectionSchema, SettingDef } from "../schema/types";
 
 export interface SettingChange {
+  /** "*" for changes spanning sections (ink reorder / reset). */
   section: string;
   key: string;
   stage: StageId | null;
@@ -55,7 +57,47 @@ export class SettingsStore {
     // New objects along the changed path so listeners can compare by reference.
     this.settings = { ...this.settings, [section]: { ...sectionValues, [key]: next } } as ProjectSettings;
 
-    const change: SettingChange = { section, key, stage: stageFor(section, key), commit };
+    this.emit({ section, key, stage: stageFor(section, key), commit });
+  }
+
+  /** Sets one ink slot of a per-ink setting. */
+  setInkValue(section: string, key: string, slot: number, value: unknown, options: { commit?: boolean } = {}): void {
+    const current = this.getValue(section, key);
+    if (!Array.isArray(current)) throw new Error(`${section}.${key} is not a per-ink setting`);
+    const next = current.slice();
+    next[slot] = value;
+    this.setValue(section, key, next, options);
+  }
+
+  /**
+   * Reorders ink slots in every per-ink setting of every section, so each ink
+   * keeps all its settings when print order changes. order[newSlot] = oldSlot.
+   */
+  permuteInks(order: readonly number[]): void {
+    this.updateAllPerInk((_def, values) => values.map((_, i) => values[order[i] ?? i]));
+    this.emit({ section: "*", key: "inkSlots", stage: "split", commit: true });
+  }
+
+  /** Resets every per-ink setting in one slot to its default (used when adding an ink). */
+  resetInkSlot(slot: number): void {
+    this.updateAllPerInk((def, values) => values.map((v, i) => (i === slot ? slotDefault(def, i) : v)));
+    this.emit({ section: "*", key: "inkSlots", stage: "split", commit: true });
+  }
+
+  private updateAllPerInk(fn: (def: SettingDef, values: unknown[]) => unknown[]): void {
+    const next = { ...this.settings } as Record<string, Record<string, unknown>>;
+    for (const section of SECTIONS as readonly SectionSchema[]) {
+      for (const def of section.settings) {
+        if (!def.perInk) continue;
+        const values = next[section.id]?.[def.key];
+        if (!Array.isArray(values)) continue;
+        next[section.id] = { ...next[section.id], [def.key]: coerceValue(def, fn(def, values)) };
+      }
+    }
+    this.settings = next as ProjectSettings;
+  }
+
+  private emit(change: SettingChange): void {
     for (const listener of this.listeners) listener(this.settings, change);
   }
 

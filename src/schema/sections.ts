@@ -33,11 +33,83 @@ export const uploadSection = defineSection({
   ],
 });
 
+// The palette's controls are a custom block (ui/sections/palette.ts), so every
+// setting here is hidden from the generated panel.
 export const paletteSection = defineSection({
   id: "palette",
   title: "Palette",
   stage: "overlapTable",
-  settings: [],
+  settings: [
+    {
+      kind: "select",
+      key: "source",
+      label: "Colors",
+      default: "manual",
+      display: "segmented",
+      hidden: true,
+      stage: null,
+      options: [
+        { value: "manual", label: "Manual" },
+        { value: "auto", label: "Auto" },
+      ],
+    },
+    {
+      kind: "toggle",
+      key: "autoIncludeBackground",
+      label: "Pick the background from the image too",
+      default: false,
+      hidden: true,
+      stage: null,
+    },
+    {
+      kind: "number",
+      key: "inkCount",
+      label: "Number of inks",
+      default: 3,
+      min: 1,
+      max: 4,
+      step: 1,
+      hidden: true,
+      stage: "split",
+    },
+    {
+      kind: "color",
+      key: "inkColor",
+      label: "Ink color",
+      perInk: true,
+      default: "#000000",
+      slotDefaults: ["#0078bf", "#ff48b0", "#ffe800", "#000000"],
+      hidden: true,
+    },
+    {
+      kind: "text",
+      key: "inkName",
+      label: "Ink name",
+      perInk: true,
+      default: "Ink",
+      slotDefaults: ["Blue", "Fluorescent Pink", "Yellow", "Black"],
+      maxLength: 40,
+      hidden: true,
+      stage: null,
+    },
+    {
+      // True once the user types a name, so later color changes stop renaming the ink.
+      kind: "toggle",
+      key: "inkNameEdited",
+      label: "Ink name edited",
+      perInk: true,
+      default: false,
+      hidden: true,
+      stage: null,
+    },
+    {
+      kind: "color",
+      key: "paper",
+      label: "Paper",
+      default: "#f6f3ec",
+      hidden: true,
+    },
+  ],
 });
 
 export const adjustSection = defineSection({

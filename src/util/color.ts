@@ -97,3 +97,24 @@ export function rgbToHex(color: RgbColor): string {
   const to = (v: number) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0");
   return `#${to(color.r)}${to(color.g)}${to(color.b)}`;
 }
+
+function labFInv(t: number): number {
+  return t > 0.206893 ? t * t * t : (t - 16 / 116) / 7.787;
+}
+
+export function labToLinear(lab: Lab): LinearRgb {
+  const fy = (lab.l + 16) / 116;
+  const x = WHITE.x * labFInv(fy + lab.a / 500);
+  const y = WHITE.y * labFInv(fy);
+  const z = WHITE.z * labFInv(fy - lab.b / 200);
+  return {
+    r: 3.2404542 * x - 1.5371385 * y - 0.4985314 * z,
+    g: -0.969266 * x + 1.8760108 * y + 0.041556 * z,
+    b: 0.0556434 * x - 0.2040259 * y + 1.0572252 * z,
+  };
+}
+
+/** Lab to sRGB 0..255, clipped to the sRGB gamut. */
+export function labToRgb(lab: Lab): RgbColor {
+  return linearToRgb(labToLinear(lab));
+}

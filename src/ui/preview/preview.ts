@@ -8,6 +8,16 @@ import { ViewRenderer, type ViewTransform } from "./viewRenderer";
 const MAX_SCALE = 32; // 3200%
 const FIT_PADDING_CSS = 24;
 
+/** While set, a click (without dragging) on the image picks instead of panning. */
+export interface PickHandler {
+  onHover(clientX: number, clientY: number): void;
+  onPick(clientX: number, clientY: number): void;
+  onLeave(): void;
+}
+
+/** Pointer travel (CSS px) below which a press counts as a click, not a drag. */
+const CLICK_SLOP = 4;
+
 export interface PreviewOptions {
   /** Background color around the image, linear RGB. */
   background: [number, number, number];
@@ -29,6 +39,8 @@ export class Preview {
   private fitted = true;
   private frameRequested = false;
   private pointers = new Map<number, { x: number; y: number }>();
+  private pickHandler: PickHandler | null = null;
+  private pressStart: { x: number; y: number; moved: boolean } | null = null;
   private gesture: { scale: number; originX: number; originY: number; midX: number; midY: number; dist: number } | null =
     null;
 
@@ -69,6 +81,18 @@ export class Preview {
     this.bindInteractions();
     this.bindDrop();
     new ResizeObserver(() => this.resize()).observe(this.element);
+  }
+
+  setPaper(linear: [number, number, number]): void {
+    this.renderer.setPaper(linear);
+    this.requestRender();
+  }
+
+  /** Turns eyedropper picking on (handler) or off (null). */
+  setPickHandler(handler: PickHandler | null): void {
+    this.pickHandler?.onLeave();
+    this.pickHandler = handler;
+    this.canvas.classList.toggle("picking", handler !== null);
   }
 
   get hasImage(): boolean {
@@ -155,6 +179,8 @@ export class Preview {
     const cy = (this.canvas.height / 2 - this.view.originY) / this.view.scale;
     this.canvas.width = w;
     this.canvas.height = h;
+    // Resizing clears the canvas, so always redraw (even with no image).
+    this.requestRender();
     if (this.fitted) {
       this.fit();
     } else {
@@ -207,12 +233,19 @@ export class Preview {
       if (!this.hasImage) return;
       c.setPointerCapture(e.pointerId);
       this.pointers.set(e.pointerId, this.devicePoint(e));
+      this.pressStart = this.pointers.size === 1 ? { x: e.clientX, y: e.clientY, moved: false } : null;
       this.startGesture();
       c.classList.add("panning");
     });
 
     c.addEventListener("pointermove", (e) => {
+      if (this.pickHandler && this.pointers.size === 0) this.pickHandler.onHover(e.clientX, e.clientY);
       if (!this.pointers.has(e.pointerId) || !this.gesture) return;
+      if (this.pressStart && Math.hypot(e.clientX - this.pressStart.x, e.clientY - this.pressStart.y) > CLICK_SLOP) {
+        this.pressStart.moved = true;
+      }
+      // In pick mode, small jitter during a click must not nudge the view.
+      if (this.pickHandler && this.pressStart && !this.pressStart.moved) return;
       this.pointers.set(e.pointerId, this.devicePoint(e));
       const { midX, midY, dist } = this.pointerSummary();
       const g = this.gesture;
@@ -230,6 +263,11 @@ export class Preview {
 
     const end = (e: PointerEvent) => {
       if (!this.pointers.delete(e.pointerId)) return;
+      const press = this.pressStart;
+      this.pressStart = null;
+      if (e.type === "pointerup" && this.pickHandler && press && !press.moved && this.pointers.size === 0) {
+        this.pickHandler.onPick(e.clientX, e.clientY);
+      }
       if (this.pointers.size > 0) this.startGesture();
       else {
         this.gesture = null;
@@ -239,8 +277,10 @@ export class Preview {
     c.addEventListener("pointerup", end);
     c.addEventListener("pointercancel", end);
 
+    c.addEventListener("pointerleave", () => this.pickHandler?.onLeave());
+
     c.addEventListener("dblclick", (e) => {
-      if (!this.hasImage) return;
+      if (!this.hasImage || this.pickHandler) return;
       const p = this.devicePoint(e);
       if (Math.abs(this.view.scale - 1) < 0.01) this.fit();
       else this.zoomAround(1, p.x, p.y);

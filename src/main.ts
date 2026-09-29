@@ -6,7 +6,10 @@ import { findSetting } from "./schema/registry";
 import { createUploadBlock } from "./ui/sections/upload";
 import { Panel } from "./ui/panel";
 import { Preview } from "./ui/preview/preview";
-import { srgbToLinearChannel } from "./util/color";
+import { hexToRgb, srgbToLinearChannel } from "./util/color";
+import { PaletteActions } from "./app/palette";
+import { Eyedropper } from "./ui/preview/eyedropper";
+import { createPaletteBlock } from "./ui/sections/palette";
 
 const DEBUG = new URLSearchParams(location.search).has("debug");
 
@@ -102,8 +105,23 @@ function start(root: HTMLElement): void {
   }
   preview.element.append(notice);
 
+  // ---- Palette + eyedropper ----
+  const palette = new PaletteActions(settings, source);
+  const eyedropper = new Eyedropper(
+    preview,
+    () => source.get()?.bitmap ?? null,
+    (target, hex) => (target.kind === "ink" ? palette.setInkColor(target.slot, hex) : palette.setPaper(hex)),
+  );
+  const paletteBlock = createPaletteBlock(settings, source, palette, eyedropper);
+
+  const showPaper = () => {
+    const rgb = hexToRgb(settings.get().palette.paper) ?? { r: 255, g: 255, b: 255 };
+    preview.setPaper([rgb.r, rgb.g, rgb.b].map((v) => srgbToLinearChannel(v / 255)) as [number, number, number]);
+  };
+  showPaper();
+
   // ---- Panel ----
-  const panel = new Panel(settings, { upload: uploadBlock.element });
+  const panel = new Panel(settings, { upload: uploadBlock.element, palette: paletteBlock });
 
   const main = document.createElement("main");
   main.className = "app-main";
@@ -113,6 +131,7 @@ function start(root: HTMLElement): void {
   // ---- Wiring ----
   source.subscribe((image) => {
     if (!image) return;
+    eyedropper.stop();
     preview.setImage(image.bitmap);
     uploadBlock.showImage(image);
     updateStatus();
@@ -127,6 +146,7 @@ function start(root: HTMLElement): void {
 
   settings.subscribe((_, change) => {
     if (change.section === "upload" && change.key === "mode") showMode();
+    if (change.section === "palette" && change.key === "paper") showPaper();
     // A typed project name stops following the uploaded file's name.
     if (change.section === "upload" && change.key === "projectName") nameFollowsFile = false;
     if (DEBUG && change.commit) {

@@ -23,6 +23,7 @@ uniform vec2 uImageSize;  // image px
 uniform vec2 uOrigin;     // device px position of the image's top-left corner
 uniform float uScale;     // device px per image px
 uniform vec3 uBackground; // linear
+uniform vec3 uPaper;      // linear
 out vec4 outColor;
 ${GLSL_LINEAR_TO_SRGB}
 void main() {
@@ -32,7 +33,7 @@ void main() {
   vec4 t = texture(uImage, uv);
   vec3 c = uBackground;
   if (all(greaterThanEqual(uv, vec2(0.0))) && all(lessThan(uv, vec2(1.0)))) {
-    c = mix(vec3(1.0), t.rgb, t.a); // transparent areas show as white for now
+    c = mix(uPaper, t.rgb, t.a); // transparent areas show the paper
   }
   outColor = vec4(linearToSrgb(c), 1.0);
 }
@@ -49,7 +50,7 @@ export interface ViewTransform {
   originY: number;
 }
 
-const UNIFORMS = ["uImage", "uViewSize", "uImageSize", "uOrigin", "uScale", "uBackground"] as const;
+const UNIFORMS = ["uImage", "uViewSize", "uImageSize", "uOrigin", "uScale", "uBackground", "uPaper"] as const;
 
 export class ViewRenderer {
   readonly gl: WebGL2RenderingContext;
@@ -60,6 +61,7 @@ export class ViewRenderer {
   private imageWidth = 0;
   private imageHeight = 0;
   private magNearest = false;
+  private paper: [number, number, number] = [1, 1, 1];
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -74,6 +76,11 @@ export class ViewRenderer {
     });
     this.program = createProgram(this.gl, FULLSCREEN_VERTEX, FRAGMENT);
     this.uniforms = uniformLocations(this.gl, this.program, UNIFORMS);
+  }
+
+  /** Paper color (linear RGB), shown through transparent parts of the image. */
+  setPaper(paper: [number, number, number]): void {
+    this.paper = paper;
   }
 
   setImage(bitmap: ImageBitmap): void {
@@ -130,6 +137,7 @@ export class ViewRenderer {
     gl.uniform2f(this.uniforms.uOrigin, view.originX, view.originY);
     gl.uniform1f(this.uniforms.uScale, view.scale);
     gl.uniform3f(this.uniforms.uBackground, ...this.background);
+    gl.uniform3f(this.uniforms.uPaper, ...this.paper);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 }

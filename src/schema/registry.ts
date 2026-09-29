@@ -22,9 +22,15 @@ export function stageFor(sectionId: string, key: string): StageId | null {
   return def.stage === undefined ? section.stage : def.stage;
 }
 
+/** Default for one ink slot (or the scalar default when slot is omitted). */
+export function slotDefault(def: SettingDef, slot?: number): unknown {
+  const slotValues = def.slotDefaults as readonly unknown[] | undefined;
+  const value = slot !== undefined && slotValues?.[slot] !== undefined ? slotValues[slot] : def.default;
+  return def.kind === "curve" ? (value as typeof def.default).map((p) => [p[0], p[1]] as const) : value;
+}
+
 function defaultValue(def: SettingDef): unknown {
-  const value = def.kind === "curve" ? def.default.map((p) => [p[0], p[1]] as const) : def.default;
-  return def.perInk ? Array.from({ length: MAX_INKS }, () => value) : value;
+  return def.perInk ? Array.from({ length: MAX_INKS }, (_, i) => slotDefault(def, i)) : slotDefault(def);
 }
 
 export function defaultsForSection(section: SectionSchema): Record<string, unknown> {
@@ -40,7 +46,8 @@ export function defaultProjectSettings(): ProjectSettings {
 }
 
 /** Coerces one (non-per-ink) value to something valid for its definition, falling back to the default. */
-export function coerceScalar(def: SettingDef, value: unknown): unknown {
+export function coerceScalar(def: SettingDef, value: unknown, slot?: number): unknown {
+  if (value === undefined) return slotDefault(def, slot);
   switch (def.kind) {
     case "number": {
       const n = typeof value === "number" ? value : Number(value);
@@ -70,7 +77,7 @@ export function coerceScalar(def: SettingDef, value: unknown): unknown {
 export function coerceValue(def: SettingDef, value: unknown): unknown {
   if (!def.perInk) return coerceScalar(def, value);
   const arr = Array.isArray(value) ? value : [];
-  return Array.from({ length: MAX_INKS }, (_, i) => coerceScalar(def, arr[i]));
+  return Array.from({ length: MAX_INKS }, (_, i) => coerceScalar(def, arr[i], i));
 }
 
 /** Whether a setting is shown for the current mode and section values. */

@@ -17,6 +17,10 @@ interface SettingBase<T> {
   readonly default: T;
   /** One value per ink slot (stored as an array of length MAX_INKS). */
   readonly perInk?: boolean;
+  /** Per-ink only: a different default for each slot (falls back to `default`). */
+  readonly slotDefaults?: readonly T[];
+  /** No generated control: a section's custom block edits this value. */
+  readonly hidden?: boolean;
   /** Only shown in these modes. Omit to show in both. */
   readonly modes?: readonly AppMode[];
   /** Hidden behind the section's Basic/Advanced toggle. */

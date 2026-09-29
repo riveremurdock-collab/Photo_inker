@@ -71,6 +71,7 @@ All app settings live in one typed **`ProjectSettings`** object held by `app/sto
 - **Sections.** Settings are grouped into `SectionSchema { id, title, stage, settings }`, declared with `defineSection()` in `src/schema/sections.ts`. `stage` is the pipeline stage that reruns when anything in the section changes (unless a setting overrides it).
 - **Derived type.** `ProjectSettings` is derived from the schema by TypeScript (literal keys and option values), so `settings.upload.mode` is typed `"digital" | "print"` without a hand-written interface.
 - **Plugin settings.** A splitting method or halftone type brings its own `schema`. The section shows the chosen plugin's controls, and its values are stored under `settings.split.methods[methodId]` / `settings.halftone.types[typeId]`, so switching methods keeps each method's settings.
+- **Inks.** Inks are per-ink settings in slots 0..`inkCount`-1, and slot order is print order. `SettingsStore.permuteInks(order)` reorders every per-ink setting in every section at once, so an ink's settings travel with it.
 - **Generated UI.** Controls are generated from the schema. Sections with special UI (palette list, histogram band handles, curve editors) add a custom builder, but their values still live in the settings object and are still described by `SettingDef`s.
 - **Walking the schema.** Presets, save/load, and randomize (later) only walk the schema.
   - Defaults: `defaultsFor(schema)`.
@@ -196,7 +197,7 @@ Code is copied in, never linked, and each file notes where it came from.
 | `ui/preview.ts` zoom/pan math | preview canvas (rewritten for WebGL + devicePixelRatio) | Step 1 |
 | `panel.ts` `<details>` sections, slider row (preview/commit) | control builders | Step 1 |
 | `ui/imageLoad.ts`, upload drop zone, `crop.ts` downscale | upload stage (adds max size, multi-step downscale) | Step 1 |
-| `ui/risoPresets.ts` | palette ink presets | Step 2 |
+| `ui/risoPresets.ts` | `app/inkLibrary.ts` (extended to 31 inks + paper presets, auto naming) | Step 2 |
 | `separation/neugebauer.ts` `solveCoverage`, `lut.ts` | starting point for Ink Matching (rewritten on spectral model) | Step 4 |
 | `engine/grain.ts` min dot constant | min dot size default | Step 5 |
 | `output/sizeUnits.ts`, `downloadBlob` | export sizing | Step 6 |
