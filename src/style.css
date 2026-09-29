@@ -1,0 +1,105 @@
+/* Photo Inker. Palette follows the Kawa Designs site (same variables as the
+   stipple tool). Fonts fall back to the system stack when run standalone. */
+
+:root {
+  --color-black-grey: #1c1c1c;
+  --color-dark-grey: #3f3f3f;
+  --color-olive: #717045;
+  --color-sage: #a4a97f;
+  --color-mint: #d6e8bd;
+  --color-light-sage: #edf2e9;
+  --color-dark-sandstone: #9b5108;
+  --color-orange: #f78f28;
+  --color-light-orange: #f7bc5c;
+
+  --font-main: "Futura", "Century Gothic", sans-serif;
+  --font-display: "AveriaLibre", "Futura", sans-serif;
+
+  --panel-width: 340px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-main);
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--color-black-grey);
+  background: #fff;
+  scrollbar-color: var(--color-sage) var(--color-mint);
+}
+
+#app {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--color-mint);
+}
+
+.app-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.app-main {
+  display: grid;
+  grid-template-columns: 1fr var(--panel-width);
+  min-height: 0;
+}
+
+.preview {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--color-light-sage);
+}
+
+.preview-empty {
+  color: var(--color-dark-grey);
+}
+
+.panel {
+  overflow-y: auto;
+  border-left: 1px solid var(--color-mint);
+  background: #fff;
+}
+
+.status {
+  padding: 4px 16px;
+  font-size: 12px;
+  color: var(--color-dark-grey);
+  border-top: 1px solid var(--color-mint);
+}
+
+@media (max-width: 760px) {
+  .app-main {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr auto;
+  }
+  .panel {
+    border-left: none;
+    border-top: 1px solid var(--color-mint);
+    max-height: 50vh;
+  }
+}

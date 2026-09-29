@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "WebWorker"]
+  },
+  "include": [
+    "src/workers/**/*.worker.ts",
+    "src/workers/protocol.ts",
+    "src/workers/yield.ts",
+    "src/util/**/*.ts"
+  ]
+}
