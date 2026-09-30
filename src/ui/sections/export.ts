@@ -36,8 +36,13 @@ export function createExportBlock(store: SettingsStore, source: SourceStore, pip
   function refresh(): void {
     const image = source.get();
     const settings = store.get();
+    const e = settings.export;
     const isPrint = settings.upload.mode === "print";
-    button.textContent = isPrint ? "Export riso layers" : `Export ${settings.export.digitalFormat.toUpperCase()}`;
+    button.textContent = !isPrint
+      ? `Export ${e.digitalFormat.toUpperCase()}`
+      : e.printTarget === "standard"
+        ? `Export ${e.fileFormat.toUpperCase()} page`
+        : "Export riso layers";
     button.disabled = running || !image;
     if (!image) {
       summary.textContent = "Upload an image to export.";
@@ -45,12 +50,16 @@ export function createExportBlock(store: SettingsStore, source: SourceStore, pip
     }
     const plan = planExport(settings, image.width, image.height);
     const size = `${plan.width} × ${plan.height} px`;
+    const inches = `${(plan.width / (plan.dpi ?? 600)).toFixed(2)} × ${(plan.height / (plan.dpi ?? 600)).toFixed(2)} in`;
     if (plan.kind === "riso") {
-      const inches = `${(plan.width / (plan.dpi ?? 600)).toFixed(2)} × ${(plan.height / (plan.dpi ?? 600)).toFixed(2)} in`;
       const halftone = settings.halftone.type === "none" ? "smooth grayscale (the riso screens it)" : "black and white";
-      summary.textContent = `${plan.inkCount} ${plan.inkCount === 1 ? "layer" : "layers"}, ${halftone}, ${inches} at ${plan.dpi} DPI (${size}), as a zip of PNGs.`;
+      const files = plan.format === "pdf" ? "one PDF, a page per layer" : "PNGs";
+      const extras = [e.includeProof && "a color proof", e.includeSheet && "a print sheet"].filter(Boolean).join(" and ");
+      summary.textContent = `${plan.inkCount} ${plan.inkCount === 1 ? "layer" : "layers"}, ${halftone}, ${inches} at ${plan.dpi} DPI (${size}), as ${files}${extras ? ` with ${extras}` : ""}, zipped.`;
+    } else if (plan.kind === "standard") {
+      summary.textContent = `One color page, ${inches} at ${plan.dpi} DPI (${size}), as ${plan.format.toUpperCase()}. No print simulation.`;
     } else {
-      summary.textContent = `${plan.format.toUpperCase()}, ${size}.`;
+      summary.textContent = `${plan.format.toUpperCase()}, ${size}${plan.format === "png" && e.transparent ? ", transparent background" : ""}.`;
     }
   }
 
@@ -67,6 +76,7 @@ export function createExportBlock(store: SettingsStore, source: SourceStore, pip
       const result = await exportImage(
         pipeline,
         store.get(),
+        source.get()?.fileName ?? "",
         (fraction, text) => {
           bar.value = fraction;
           message.textContent = text;

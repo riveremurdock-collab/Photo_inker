@@ -5,6 +5,7 @@
 
 import { ViewRenderer, type DisplaySource, type ViewTransform, type FrameDisplay } from "./viewRenderer";
 import type { BorderGeometry } from "../../app/border";
+import { drawPage, pageBounds, type PageView } from "./pageOverlay";
 
 export type DisplayMode = "inks" | "original";
 
@@ -36,6 +37,9 @@ const SETTLE_DELAY_MS = 160;
 export class Preview {
   readonly element: HTMLElement;
   private canvas: HTMLCanvasElement;
+  /** 2D layer over the WebGL canvas for the Print mode page view. */
+  private overlay: HTMLCanvasElement;
+  private page: PageView | null = null;
   private renderer: ViewRenderer;
   private emptyState: HTMLElement;
   private zoomLabel: HTMLButtonElement;
@@ -67,7 +71,9 @@ export class Preview {
 
     this.canvas = document.createElement("canvas");
     this.canvas.className = "preview-canvas";
-    this.element.append(this.canvas);
+    this.overlay = document.createElement("canvas");
+    this.overlay.className = "preview-overlay";
+    this.element.append(this.canvas, this.overlay);
     this.renderer = new ViewRenderer(this.canvas, options.background);
 
     this.emptyState = document.createElement("div");
@@ -174,6 +180,24 @@ export class Preview {
     this.requestRender();
   }
 
+  /**
+   * The Print mode page (sheet, margin guide, marks) around the artwork, or
+   * null in Digital mode. The view fits the whole page.
+   */
+  setPage(page: PageView | null): void {
+    const before = this.bounds();
+    this.page = page;
+    const after = this.bounds();
+    if (this.fitted && (before.x0 !== after.x0 || before.y0 !== after.y0 || before.x1 !== after.x1 || before.y1 !== after.y1)) this.fit();
+    this.requestRender();
+  }
+
+  /** What "fit" shows, in image px: the page, or the image plus any border around it. */
+  private bounds(): { x0: number; y0: number; x1: number; y1: number } {
+    if (this.page) return pageBounds(this.page);
+    return { x0: -this.margin, y0: -this.margin, x1: this.imageWidth + this.margin, y1: this.imageHeight + this.margin };
+  }
+
   /** Called when a new image is loaded: sets the image size and fits it to the screen. */
   setImageSize(width: number, height: number): void {
     this.imageWidth = width;
@@ -199,14 +223,15 @@ export class Preview {
     const pad = FIT_PADDING_CSS * this.dpr();
     const w = Math.max(1, this.canvas.width - pad * 2);
     const h = Math.max(1, this.canvas.height - pad * 2);
-    // Fit the whole canvas: the image plus any border around it.
-    const cw = this.imageWidth + 2 * this.margin;
-    const ch = this.imageHeight + 2 * this.margin;
+    // Fit the whole page, or the image plus any border around it.
+    const b = this.bounds();
+    const cw = b.x1 - b.x0;
+    const ch = b.y1 - b.y0;
     const scale = Math.min(w / cw, h / ch);
     this.view = {
       scale,
-      originX: (this.canvas.width - cw * scale) / 2 + this.margin * scale,
-      originY: (this.canvas.height - ch * scale) / 2 + this.margin * scale,
+      originX: (this.canvas.width - cw * scale) / 2 - b.x0 * scale,
+      originY: (this.canvas.height - ch * scale) / 2 - b.y0 * scale,
     };
     this.fitted = true;
     this.changed();
@@ -223,7 +248,8 @@ export class Preview {
 
   private minScale(): number {
     if (!this.hasImage) return 0.01;
-    const fitScale = Math.min(this.canvas.width / (this.imageWidth + 2 * this.margin), this.canvas.height / (this.imageHeight + 2 * this.margin));
+    const b = this.bounds();
+    const fitScale = Math.min(this.canvas.width / (b.x1 - b.x0), this.canvas.height / (b.y1 - b.y0));
     return Math.min(fitScale / 4, 1);
   }
 
@@ -257,6 +283,8 @@ export class Preview {
     const cy = (this.canvas.height / 2 - this.view.originY) / this.view.scale;
     this.canvas.width = w;
     this.canvas.height = h;
+    this.overlay.width = w;
+    this.overlay.height = h;
     // Resizing clears the canvas, so always redraw (even with no image).
     this.requestRender();
     if (this.fitted) {
@@ -301,6 +329,9 @@ export class Preview {
       // The border belongs to the inked result; the Original view shows the image alone.
       this.renderer.setFrame(this.displayMode === "inks" ? this.frame : null);
       this.renderer.render(this.view, this.imageWidth, this.imageHeight, this.interacting ? "fast" : "full");
+      const ctx = this.overlay.getContext("2d")!;
+      ctx.clearRect(0, 0, this.overlay.width, this.overlay.height);
+      if (this.page && this.hasImage) drawPage(ctx, this.page, this.view, this.dpr());
     });
   }
 

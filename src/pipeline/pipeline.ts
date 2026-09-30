@@ -23,7 +23,7 @@
 // coverage map that low-ink patches and specks use.
 
 import { borderGeometry, fadeLut, FADE_LUT_SIZE, frameUniforms, type BorderGeometry } from "../app/border";
-import { outputScale } from "../app/output";
+import { outputScale } from "../app/layout";
 import { simNeedsDensity, simReach, simUniforms, type SimPurpose } from "../app/printSim";
 import type { SourceStore } from "../app/source";
 import type { SettingsStore } from "../app/store";
@@ -576,7 +576,7 @@ export class Pipeline {
       knockout: vec((i) => (l.knockout[i] ? 1 : 0)),
       limit: l.inkLimit / 100,
       trapOut: vec((i) => l.trap[i] ?? 0),
-      outScale: image ? outputScale(settings, image.width) : 1,
+      outScale: image ? outputScale(settings, image.width, image.height) : 1,
     };
   }
 
@@ -680,7 +680,7 @@ export class Pipeline {
   // ---- print simulation: uniforms for the mix pass and compositor, plus the coverage map ----
 
   private runPrintSim(settings: ProjectSettings, W: number, H: number): boolean {
-    const scale = outputScale(settings, W);
+    const scale = outputScale(settings, W, H);
     const needsDensity = simNeedsDensity(settings);
     const key = JSON.stringify([
       settings.printSim,
@@ -777,7 +777,7 @@ export class Pipeline {
   private runHalftone(settings: ProjectSettings, imageWidth: number, imageHeight: number): boolean {
     if (this.runPreviewOverride()) return true;
     const method = halftoneMethod(settings.halftone.type);
-    const scale = outputScale(settings, imageWidth);
+    const scale = outputScale(settings, imageWidth, imageHeight);
     if (!method) {
       return this.stage("halftone", `none|${this.version("mix")}`, () => {
         this.halftoned = false;

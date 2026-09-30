@@ -18,6 +18,8 @@ import { createAmBlock } from "./ui/sections/halftone";
 import { createExportBlock } from "./ui/sections/export";
 import { createChannelSplitBlock } from "./ui/sections/channelSplit";
 import { createSelectiveColorBlock } from "./ui/sections/selectiveColor";
+import { outputLayout } from "./app/layout";
+import { layerLabels, markShapes } from "./export/marks";
 
 const DEBUG = new URLSearchParams(location.search).has("debug");
 
@@ -180,10 +182,24 @@ function start(root: HTMLElement): void {
   root.append(header, main, status);
 
   // ---- Wiring ----
+  // Print mode: show the page (sheet, margin guide, marks) around the artwork.
+  const showPage = () => {
+    const image = source.get();
+    const s = settings.get();
+    if (!image || s.upload.mode !== "print" || s.export.pageSize === "image") {
+      preview.setPage(null);
+      return;
+    }
+    const layout = outputLayout(s, image.width, image.height);
+    const paper = s.export.printTarget === "standard" ? "#ffffff" : s.palette.paper;
+    preview.setPage({ layout, marks: markShapes(layout, s, layerLabels(s)), paper });
+  };
+
   source.subscribe((image) => {
     if (!image) return;
     eyedropper.stop();
     preview.setImageSize(image.width, image.height);
+    showPage();
     uploadBlock.showImage(image);
     updateStatus();
   });
@@ -196,6 +212,7 @@ function start(root: HTMLElement): void {
   showMode();
 
   settings.subscribe((_, change) => {
+    showPage();
     if (change.section === "upload" && change.key === "mode") showMode();
     if (change.section === "palette" && change.key === "paper") showPaper();
     // A typed project name stops following the uploaded file's name.

@@ -1,11 +1,9 @@
 // Streaming PNG encoder: rows are compressed as they arrive, so a huge image
 // (e.g. an A3 layer at 600 DPI) never has to exist uncompressed in memory.
 // Writes the resolution (pHYs) so print layers open at the right DPI, and
-// marks RGB images as sRGB.
-//
-// Compression uses the browser's own CompressionStream("deflate") (zlib format).
-// fflate's streaming Zlib (0.8.3) produced corrupt streams for hard-to-compress
-// data pushed in many pieces ("invalid distance too far back").
+// can mark color images as sRGB. Compression: see deflate.ts.
+
+import { DeflateStream } from "./deflate";
 
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
@@ -34,12 +32,20 @@ function chunk(type: string, data: Uint8Array): Uint8Array {
   return out;
 }
 
-export type PngColor = "gray" | "rgb";
+export type PngColor = "gray" | "rgb" | "rgba";
+
+const CHANNELS: Record<PngColor, number> = { gray: 1, rgb: 3, rgba: 4 };
+const COLOR_TYPE: Record<PngColor, number> = { gray: 0, rgb: 2, rgba: 6 };
+
+export interface PngOptions {
+  /** Resolution to record (pHYs). */
+  dpi?: number;
+  /** Mark a color image as sRGB (sRGB chunk). */
+  srgb?: boolean;
+}
 
 export class PngEncoder {
-  private compressed: Uint8Array[] = [];
-  private writer: WritableStreamDefaultWriter<BufferSource>;
-  private reading: Promise<void>;
+  private deflate = new DeflateStream();
   private channels: number;
   private rowsWritten = 0;
   private done = false;
@@ -48,29 +54,20 @@ export class PngEncoder {
     readonly width: number,
     readonly height: number,
     private color: PngColor,
-    private dpi?: number,
+    private options: PngOptions = {},
   ) {
-    this.channels = color === "gray" ? 1 : 3;
-    const stream = new CompressionStream("deflate");
-    this.writer = stream.writable.getWriter();
-    const reader = stream.readable.getReader();
-    this.reading = (async () => {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) return;
-        this.compressed.push(value);
-      }
-    })();
+    this.channels = CHANNELS[color];
   }
 
   /**
    * Adds rows (tightly packed, `channels` bytes per pixel, no filter byte).
    * Each row is stored with the PNG filter that usually compresses it best:
-   * none for flat black-and-white layers, "sub" for photos.
+   * none for flat black-and-white layers, "sub" for color.
    * Resolves once the compressor is ready for more (backpressure).
    */
   async writeRows(pixels: Uint8Array, rowCount: number): Promise<void> {
     const stride = this.width * this.channels;
+    const ch = this.channels;
     const filtered = new Uint8Array(rowCount * (stride + 1));
     for (let r = 0; r < rowCount; r++) {
       const row = pixels.subarray(r * stride, (r + 1) * stride);
@@ -80,62 +77,44 @@ export class PngEncoder {
         filtered.set(row, o + 1);
       } else {
         filtered[o] = 1; // Sub: difference from the pixel to the left
-        for (let i = 0; i < stride; i++) {
-          filtered[o + 1 + i] = (row[i]! - (i >= this.channels ? row[i - this.channels]! : 0)) & 0xff;
-        }
+        for (let i = 0; i < stride; i++) filtered[o + 1 + i] = (row[i]! - (i >= ch ? row[i - ch]! : 0)) & 0xff;
       }
     }
     this.rowsWritten += rowCount;
-    await this.writer.ready;
-    void this.writer.write(filtered);
+    await this.deflate.write(filtered);
   }
 
   async finish(): Promise<Blob> {
     if (this.done) throw new Error("PNG already finished");
     if (this.rowsWritten !== this.height) throw new Error(`PNG got ${this.rowsWritten} of ${this.height} rows`);
     this.done = true;
-    await this.writer.close();
-    await this.reading;
+    const data = await this.deflate.finish();
 
     const ihdr = new Uint8Array(13);
     const v = new DataView(ihdr.buffer);
     v.setUint32(0, this.width);
     v.setUint32(4, this.height);
     ihdr[8] = 8; // bit depth
-    ihdr[9] = this.color === "gray" ? 0 : 2; // color type
+    ihdr[9] = COLOR_TYPE[this.color];
     ihdr[10] = 0; // compression
     ihdr[11] = 0; // filter method
     ihdr[12] = 0; // no interlace
 
     const parts: Uint8Array[] = [new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr)];
-    if (this.color === "rgb") parts.push(chunk("sRGB", new Uint8Array([0]))); // perceptual intent
-    if (this.dpi) {
+    if (this.options.srgb && this.color !== "gray") parts.push(chunk("sRGB", new Uint8Array([0]))); // perceptual intent
+    if (this.options.dpi) {
       const phys = new Uint8Array(9);
       const pv = new DataView(phys.buffer);
-      const ppm = Math.round(this.dpi / 0.0254);
+      const ppm = Math.round(this.options.dpi / 0.0254);
       pv.setUint32(0, ppm);
       pv.setUint32(4, ppm);
       phys[8] = 1; // unit: meter
       parts.push(chunk("pHYs", phys));
     }
     // Split the compressed data into IDAT chunks of up to 1 MB.
-    const all = concat(this.compressed);
-    for (let i = 0; i < all.length; i += 1 << 20) parts.push(chunk("IDAT", all.subarray(i, Math.min(all.length, i + (1 << 20)))));
-    if (all.length === 0) parts.push(chunk("IDAT", all));
+    for (let i = 0; i < data.length; i += 1 << 20) parts.push(chunk("IDAT", data.subarray(i, Math.min(data.length, i + (1 << 20)))));
+    if (data.length === 0) parts.push(chunk("IDAT", data));
     parts.push(chunk("IEND", new Uint8Array(0)));
-    this.compressed = [];
     return new Blob(parts as BlobPart[], { type: "image/png" });
   }
-}
-
-function concat(parts: Uint8Array[]): Uint8Array {
-  let n = 0;
-  for (const p of parts) n += p.length;
-  const out = new Uint8Array(n);
-  let o = 0;
-  for (const p of parts) {
-    out.set(p, o);
-    o += p.length;
-  }
-  return out;
 }

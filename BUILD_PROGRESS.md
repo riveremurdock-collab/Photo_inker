@@ -18,8 +18,8 @@
 | 10 | Remaining halftone types | ✅ Done |
 | 11 | Border | ✅ Done |
 | 12 | Print simulation | ✅ Done |
-| 13 | Full export options | ⏳ Next |
-| 14 | Performance and polish | — |
+| 13 | Full export options | ✅ Done |
+| 14 | Performance and polish | ⏳ Next |
 
 ## Decisions
 
@@ -284,6 +284,21 @@
 - **Performance:** with the effects off (riso layers, or Simulate printing off) a pass-through variant of the GLSL is compiled instead (only compensation stays). The full code in every shader had slowed the A3 riso export from 11 s to 68 s on the software GPU; with the variant it is back to 12 s.
 - **Test fix:** Step 9's knockout check and Step 6's summary rounding were test mistakes (fixed in Step 11). Running two browser tests at once on the software GPU makes timing-based checks fail; the suites are run one at a time.
 - **Known limits:** error diffusion's bitmap is built from raw coverage, so dot gain and compensation don't change it (misregistration, patches and specks do apply). Specks in the smooth view are sampled at working resolution.
+
+### Step 13
+- **Layout** (`app/layout.ts`): one function gives the output size, the artwork's place (image plus any border) and the output scale, for the export, the preview and the halftone sizes. Replaces `app/output.ts`.
+  - Digital: 0.5× / 1× / 2× / 3× / custom width; with the aspect ratio unlocked, custom width × height with the artwork fitted or filled (the rest is paper, or transparent).
+  - Print: Letter, Legal, Tabloid, A4, A3, B4 (JIS, 257 × 364 mm), custom (in or mm), or "Image only" (the old behavior: the file is the artwork at a set width). Portrait/landscape, DPI (600 default), placement fit (inside the margins) / fill (page + bleed, cropping) / custom (width + position), margins (mm, default 5), bleed (mm, grows the file on every side).
+- **Riso export:** layers as PNGs or one PDF (a gray page per layer, at the page's physical size); a composite proof (the page at 150 DPI with the print simulation as the preview shows it, on the paper color); a print sheet (letter PNG: page setup, inks in order with swatches and file names, and the split/halftone/layer settings from the schema); all zipped.
+- **Marks** (`export/marks.ts`): crop marks at the artwork corners (the page's with Fill), registration targets centered on each side, layer labels ("project · layer n of N · #HEX") in the bottom margin. Drawn once as small stamps and pressed into each strip, identical on every layer (labels per layer). Only marks that fit on the page are drawn.
+- **Standard printer:** one color page (PNG with DPI, or PDF with the sRGB profile), no print simulation; crop marks available.
+- **Color files:** JPG quality; transparent PNG background (RGBA: paper samples transparent, ink keeps its printed color; smooth None separates the paper back out of the mix); "Embed sRGB profile" (PNG sRGB chunk; JPG APP2 ICC and PDF ICCBased with a generated v2 sRGB profile, `export/icc.ts`). The browser's JPG encoder adds its own profile, so ours replaces it (never two), and turning the option off removes it.
+- **Preview:** in Print mode the page is shown around the artwork (sheet in the paper color, page edge, trim line with bleed, the margins as a red dashed guide, the marks), and Fit shows the whole page.
+- **Shared pieces:** `export/deflate.ts` (streaming zlib via CompressionStream, used by PNG and PDF), `export/pdf.ts` (minimal image-per-page PDF writer). Export tiles that miss the artwork are filled without the GPU; the shaders fill outside the artwork and can render reduced-resolution grids with supersampling (the proof).
+- **Measured:** page sizes exact at 600 DPI for every preset, landscape and bleed (e.g. Letter 5100 × 6600, A4 4961 × 7016, A4 + 3 mm bleed 5102 wide); Letter riso export with marks at 600 DPI in ~7 s (3 inks, software GPU); marks identical across layers (25,671 shared mark px, labels 2,100–2,250 px per layer); PDF: 3 pages, MediaBox 612 × 792 pt, image streams decode to full pages; proof 1275 × 1650 at 150 DPI; standard printer page identical with the simulation on or off; transparent PNG corner α 0; JPG 619 KB at 60% vs 1,966 KB at 98%.
+- **Image width means the artwork:** in Image only and Custom placement, Image width is the whole artwork (image plus any border), like Fit. A +4% border therefore keeps a 4 in file 4 in wide (1200 px) and makes it taller (820 px instead of 800); before Step 13 the border was added on top of the width.
+- **Tests:** earlier suites now choose "Image only" + Image width (the old Print width) and switch off the proof and sheet, so they keep testing the same files.
+- **Fixed during testing:** registration targets in the reduced-resolution proof had a stray line (a stamp lookup read outside the stamp); a literal NUL byte slipped into `icc.ts` from an edit script and was replaced with an escape.
 
 ## Open questions
 

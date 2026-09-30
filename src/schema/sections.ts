@@ -4,6 +4,7 @@
 import { SCHEMES } from "../app/colorSchemes";
 import { HALFTONE_SECTIONS, HALFTONE_TYPE_OPTIONS } from "../plugins/halftone/registry";
 import { SPLIT_METHOD_OPTIONS, SPLIT_SECTIONS } from "../plugins/splitting/registry";
+import { exportSection } from "./exportSection";
 import { PRINT_SIM_SECTIONS } from "./printSimSections";
 import { defineSection, type SectionValues } from "./types";
 
@@ -381,88 +382,6 @@ export const borderSection = defineSection({
   ],
 });
 
-export const exportSection = defineSection({
-  id: "export",
-  title: "Export",
-  stage: null,
-  settings: [
-    {
-      kind: "select",
-      key: "digitalFormat",
-      label: "Format",
-      default: "png",
-      display: "segmented",
-      modes: ["digital"],
-      options: [
-        { value: "png", label: "PNG" },
-        { value: "jpg", label: "JPG" },
-      ],
-    },
-    {
-      kind: "select",
-      key: "digitalSize",
-      label: "Output size",
-      default: "original",
-      display: "segmented",
-      modes: ["digital"],
-      stage: "halftone",
-      options: [
-        { value: "original", label: "Original" },
-        { value: "double", label: "2×" },
-        { value: "custom", label: "Custom" },
-      ],
-      help: "Halftone sizes are measured in output pixels.",
-    },
-    {
-      kind: "number",
-      key: "digitalWidth",
-      label: "Output width",
-      default: 3000,
-      min: 100,
-      max: 16000,
-      step: 10,
-      unit: "px",
-      modes: ["digital"],
-      stage: "halftone",
-      visibleWhen: (e) => e.digitalSize === "custom",
-    },
-    {
-      kind: "number",
-      key: "printWidth",
-      label: "Print width",
-      default: 8,
-      min: 1,
-      max: 40,
-      step: 0.1,
-      unit: "in",
-      modes: ["print"],
-      stage: "halftone",
-      help: "Width of the printed image. Page size and placement come later.",
-    },
-    {
-      kind: "number",
-      key: "dpi",
-      label: "Resolution",
-      stage: "halftone",
-      default: 600,
-      min: 150,
-      max: 1200,
-      step: 50,
-      unit: "DPI",
-      modes: ["print"],
-      help: "Riso machines print at 600 DPI.",
-    },
-    {
-      kind: "toggle",
-      key: "gainCompensation",
-      label: "Dot gain compensation",
-      default: false,
-      modes: ["print"],
-      stage: "printSim",
-      help: "Shrinks dots in the riso layers so they print at the intended size after the ink spreads. Uses the Dot gain settings in Print Simulation.",
-    },
-  ],
-});
 
 export const SECTIONS = [
   uploadSection,

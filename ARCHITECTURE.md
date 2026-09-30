@@ -220,7 +220,8 @@ This follows the outline's Rendering Engine section.
   - For each tile, `Pipeline.renderRegion()` reruns copy → adjust → split → layer options for the matching image area (plus a margin), from the full-size source, at min(output, source) resolution. It is the same function the zoom detail view uses.
   - An output pass (`export/shaders.ts`) then writes either Digital color (the halftone method's GLSL with 2×2 samples per pixel, like the preview at 100%) or Riso layers (one ink per channel, 1 sample per pixel, so pure black/white; smooth for None).
 - Strips of tiles stream into `export/png.ts` (our streaming PNG encoder: the browser's `CompressionStream("deflate")`, pHYs DPI, sRGB chunk; fflate's streaming zlib was dropped in Step 10 after it produced corrupt data) or into a canvas for JPG. Riso PNGs are zipped with fflate.
-- File names: `Project.png` / `Project.jpg`; `Project_01_0078BF.png` … in print order, inside `Project_riso_layers.zip`.
+- File names: `Project.png` / `Project.jpg`; `Project_01_0078BF.png` … in print order (or `Project_riso_layers.pdf`), plus `Project_proof.png` and `Project_print_sheet.png`, inside `Project_riso_layers.zip`; standard printer: `Project_print.png` / `.pdf`.
+- **Step 13:** `app/layout.ts` is the single source of output geometry (page, bleed, margins, placement, artwork rect, output scale). The exporter renders any grid (`TilePlan`: size, image offset, output scale, pixel size, samples), fills tiles outside the artwork directly, presses printer's marks in per strip (`marks.ts`), and writes PNG (`png.ts`), PDF (`pdf.ts`) or JPG with an sRGB profile (`icc.ts`). The preview draws the page on a 2D overlay (`ui/preview/pageOverlay.ts`) from the same layout and marks.
 
 ## 7. Website embedding
 

@@ -18,7 +18,8 @@ import type { UniformValue } from "../engine/gl/gpu";
 import type { ProjectSettings } from "../schema/sections";
 import { createRng } from "../util/rng";
 
-export type SimPurpose = "preview" | "digital" | "riso";
+/** preview; digital (and the riso proof); riso layers; standard printer (no simulation). */
+export type SimPurpose = "preview" | "digital" | "riso" | "standard";
 
 const ABSORBENCY: Record<string, number> = { smooth: 0.6, uncoated: 1, recycled: 1.4 };
 const SIDES: Record<string, number> = { top: 0, bottom: 1, left: 2, right: 3 };
@@ -47,8 +48,12 @@ export function simUniforms(
   outScale: number,
   density: WebGLTexture,
 ): Record<string, UniformValue> {
-  const on = settings.printSim.enabled && purpose !== "riso";
-  const compensate = settings.upload.mode === "print" && settings.export.gainCompensation && purpose !== "digital";
+  const print = settings.upload.mode === "print";
+  const riso = print && settings.export.printTarget === "riso";
+  // A standard printer page never gets the simulation; neither does its preview.
+  const on = settings.printSim.enabled && (purpose === "digital" || (purpose === "preview" && !(print && !riso)));
+  // Compensation shapes riso layers, and the preview of them.
+  const compensate = riso && settings.export.gainCompensation && (purpose === "riso" || purpose === "preview");
   const g = settings.simGain;
   const gainAmount = (i: number) => ((g.amount[i] ?? 0) / 100) * (ABSORBENCY[g.paper] ?? 1);
   const vec4 = (f: (i: number) => number) => [0, 1, 2, 3].map(f);
