@@ -202,6 +202,35 @@ export const layersSection = defineSection({
   settings: [
     { kind: "number", key: "density", label: "Density", perInk: true, default: 100, min: 0, max: 200, step: 1, unit: "%", hidden: true },
     { kind: "toggle", key: "invert", label: "Invert", perInk: true, default: false, hidden: true },
+    { kind: "number", key: "levelsBlack", label: "Levels: start", perInk: true, default: 0, min: 0, max: 100, step: 0.5, unit: "%", hidden: true },
+    { kind: "number", key: "levelsWhite", label: "Levels: full", perInk: true, default: 100, min: 0, max: 100, step: 0.5, unit: "%", hidden: true },
+    { kind: "number", key: "levelsMid", label: "Levels: midtone", perInk: true, default: 0, min: -100, max: 100, step: 1, hidden: true },
+    {
+      kind: "curve",
+      key: "curve",
+      label: "Curve",
+      perInk: true,
+      default: [
+        [0, 0],
+        [1, 1],
+      ],
+      hidden: true,
+    },
+    // Knockout: this layer clears the layers printed before it where it has ink.
+    { kind: "toggle", key: "knockout", label: "Knockout", perInk: true, default: false, hidden: true },
+    // Choke (−) or spread (+), in output pixels.
+    { kind: "number", key: "trap", label: "Choke / spread", perInk: true, default: 0, min: -8, max: 8, step: 0.5, unit: "px", hidden: true },
+    {
+      kind: "number",
+      key: "inkLimit",
+      label: "Total ink limit",
+      default: 400,
+      min: 100,
+      max: 400,
+      step: 5,
+      unit: "%",
+      help: "Caps the combined coverage of all inks at any spot. 400% = no limit. Lower it to reduce heavy, muddy overlaps.",
+    },
     // Preview only: never affects exports.
     { kind: "toggle", key: "solo", label: "Solo", perInk: true, default: false, hidden: true, stage: "mix" },
     { kind: "toggle", key: "mute", label: "Mute", perInk: true, default: false, hidden: true, stage: "mix" },

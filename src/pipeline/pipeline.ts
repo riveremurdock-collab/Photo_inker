@@ -35,7 +35,7 @@ import { sampleCurve, type CurvePoint } from "../util/curve";
 import { SupersededError } from "../workers/workerClient";
 import { Compositor } from "./compositor";
 import { MAX_INKS } from "./coverage";
-import { ADJUST, ANALYSIS, COPY, LAYERS, LIGHTNESS, MIX, SMOOTH } from "./stages/shaders";
+import { ADJUST, ANALYSIS, COPY, LAYERS, LAYERS_TRAP, LIGHTNESS, MIX, SMOOTH } from "./stages/shaders";
 
 /** Longest texture edge used for the original image on the GPU. */
 const SOURCE_TEXTURE_CAP = 8192;
@@ -76,7 +76,25 @@ interface PassTargets {
   smoothB: Target | null;
   coverage: Target | null;
   layered: Target | null;
+  /** Intermediates for the trapping passes. */
+  layerA: Target | null;
+  layerB: Target | null;
   mixed: Target | null;
+}
+
+/** Shared layer options, resolved from the settings. */
+interface LayerParams {
+  /** 256 × 4 bytes: tone curve per ink channel (invert, levels, curve, density). */
+  tone: Uint8Array;
+  toneKey: string;
+  active: number[];
+  knockout: number[];
+  /** Total ink limit as a sum of coverages (4 = off). */
+  limit: number;
+  /** Choke (−) or spread (+) per ink, in output px. */
+  trapOut: number[];
+  /** Output px per image px. */
+  outScale: number;
 }
 
 /** How far (output px) a halftone may look from a pixel for its coverage: 1.5 × the largest cell or dot. */
@@ -85,7 +103,16 @@ function halftoneReach(values: Record<string, unknown>): number {
   return Math.max(4, ...sizes) * 1.5;
 }
 
-const emptyTargets = (): PassTargets => ({ adjusted: null, smoothA: null, smoothB: null, coverage: null, layered: null, mixed: null });
+const emptyTargets = (): PassTargets => ({
+  adjusted: null,
+  smoothA: null,
+  smoothB: null,
+  coverage: null,
+  layered: null,
+  layerA: null,
+  layerB: null,
+  mixed: null,
+});
 
 /** Everything the split/layer/mix passes need, captured by the last whole-image run (reused by detail renders). */
 interface PassInputs {
@@ -94,7 +121,7 @@ interface PassInputs {
   values: never;
   ctx: SplitContext;
   prepared: unknown;
-  layerUniforms: Record<string, UniformValue>;
+  layers: LayerParams;
   inkUniforms: Record<string, UniformValue>;
   visible: number[];
 }
@@ -116,6 +143,7 @@ export class Pipeline {
   private analysisVersion = -1;
   private toneTexture: WebGLTexture | null = null;
   private inputs: PassInputs | null = null;
+  private layerTone: { texture: WebGLTexture; key: string } | null = null;
 
   private prepared: Prepared | null = null;
   private preparing: string | null = null;
@@ -190,7 +218,7 @@ export class Pipeline {
       this.runAdjust(settings) &&
       this.runHistogram(settings) &&
       this.runSplit(settings) &&
-      this.runLayers(settings) &&
+      this.runLayers() &&
       this.runMix(settings) &&
       this.runHalftone(settings, image.width, image.height);
     if (ok) this.renderDetail();
@@ -387,7 +415,7 @@ export class Pipeline {
       values,
       ctx,
       prepared: preparedValue,
-      layerUniforms: this.layerUniforms(settings),
+      layers: this.layerParams(settings),
       inkUniforms: this.inkUniforms(settings),
       visible: this.visible(settings),
     };
@@ -405,10 +433,16 @@ export class Pipeline {
     return t.coverage;
   }
 
-  /** How far (image px) the current split method looks at neighbors (e.g. Detail Split's blur). */
+  /**
+   * How far (image px) the split method and layer options look at neighbors
+   * (e.g. Detail Split's blur, trapping), so regions and tiles get a margin.
+   */
   private splitReach(): number {
     const inputs = this.inputs;
-    return inputs?.method.reach ? inputs.method.reach(inputs.values, inputs.ctx) : 0;
+    if (!inputs) return 0;
+    const split = inputs.method.reach ? inputs.method.reach(inputs.values, inputs.ctx) : 0;
+    const trap = Math.max(...inputs.layers.trapOut.map(Math.abs)) / inputs.layers.outScale;
+    return split + (trap > 0 ? trap + 1 : 0);
   }
 
   private startSplitPrepare(pkey: string, method: SplitMethod, values: never, ctx: SplitContext): void {
@@ -447,29 +481,87 @@ export class Pipeline {
     for (const l of this.busyListeners) l(text);
   }
 
-  // ---- layer options: invert, density ----
+  // ---- layer options: tone (invert, levels, curve, density), knockout, trapping, total ink limit ----
 
-  private layerUniforms(settings: ProjectSettings): Record<string, UniformValue> {
+  private layerParams(settings: ProjectSettings): LayerParams {
     const n = settings.palette.inkCount;
-    const { density, invert } = settings.layers;
+    const l = settings.layers;
+    const image = this.host.source.get();
+    // Tone per ink: invert → levels → curve → density, as one 256-entry table per ink channel.
+    const tone = new Uint8Array(256 * 4);
+    for (let i = 0; i < n; i++) {
+      const curve = sampleCurve(l.curve[i] ?? [[0, 0], [1, 1]], 1024);
+      const black = (l.levelsBlack[i] ?? 0) / 100;
+      const white = Math.max(black + 1 / 255, (l.levelsWhite[i] ?? 100) / 100);
+      const gamma = Math.pow(2, (l.levelsMid[i] ?? 0) / 50);
+      const density = (l.density[i] ?? 100) / 100;
+      for (let v = 0; v < 256; v++) {
+        let x = v / 255;
+        if (l.invert[i]) x = 1 - x;
+        x = Math.min(1, Math.max(0, (x - black) / (white - black)));
+        x = Math.pow(x, 1 / gamma);
+        x = curve[Math.round(x * 1023)]! * density;
+        tone[v * 4 + i] = Math.round(Math.min(1, x) * 255);
+      }
+    }
     const vec = (f: (i: number) => number) => Array.from({ length: MAX_INKS }, (_, i) => (i < n ? f(i) : 0));
     return {
-      uDensity: vec((i) => (density[i] ?? 100) / 100),
-      uInvert: vec((i) => (invert[i] ? 1 : 0)),
-      uActive: vec(() => 1),
+      tone,
+      toneKey: JSON.stringify([n, l.invert, l.levelsBlack, l.levelsWhite, l.levelsMid, l.curve, l.density]),
+      active: vec(() => 1),
+      knockout: vec((i) => (l.knockout[i] ? 1 : 0)),
+      limit: l.inkLimit / 100,
+      trapOut: vec((i) => l.trap[i] ?? 0),
+      outScale: image ? outputScale(settings, image.width) : 1,
     };
   }
 
-  private runLayers(settings: ProjectSettings): boolean {
-    const uniforms = this.layerUniforms(settings);
-    return this.stage("layerOptions", `${JSON.stringify(uniforms)}|${this.version("split")}`, () => {
-      this.layersPass(uniforms, this.main.coverage!, this.main);
+  private runLayers(): boolean {
+    const p = this.inputs!.layers;
+    const texelScale = this.inputs!.ctx.texelScale;
+    const key = [p.toneKey, p.active, p.knockout, p.limit, p.trapOut, p.outScale, texelScale, this.version("split")].join("|");
+    return this.stage("layerOptions", key, () => {
+      this.layersPass(p, this.main.coverage!, this.main, texelScale);
     });
   }
 
-  private layersPass(uniforms: Record<string, UniformValue>, src: Target, t: PassTargets): Target {
-    t.layered = this.gpu.ensureTarget(t.layered, src.width, src.height, "coverage");
-    this.gpu.pass(LAYERS, t.layered, { ...uniforms, uCoverage: { texture: src.texture }, uSize: [src.width, src.height] });
+  private toneTextureFor(p: LayerParams): WebGLTexture {
+    const gl = this.gpu.gl;
+    if (!this.layerTone) {
+      const tex = gl.createTexture()!;
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      this.layerTone = { texture: tex, key: "" };
+    }
+    if (this.layerTone.key !== p.toneKey) {
+      gl.bindTexture(gl.TEXTURE_2D, this.layerTone.texture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 256, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, p.tone);
+      this.layerTone.key = p.toneKey;
+    }
+    return this.layerTone.texture;
+  }
+
+  /** Layer options for one coverage texture at `texelScale` texels per image px. */
+  private layersPass(p: LayerParams, src: Target, t: PassTargets, texelScale: number): Target {
+    const { width: w, height: h } = src;
+    const limitOn = p.limit < 3.995 ? 1 : 0;
+    const common = { uLimit: p.limit, uSize: [w, h] };
+    const toneUniforms = { ...common, uTone: { texture: this.toneTextureFor(p) }, uActive: p.active, uKnockout: p.knockout };
+    t.layered = this.gpu.ensureTarget(t.layered, w, h, "coverage");
+    // Trap sizes are in output px; convert to texels of this texture.
+    const radius = p.trapOut.map((px) => (px / p.outScale) * texelScale);
+    if (!radius.some((r) => Math.abs(r) > 0.01)) {
+      this.gpu.pass(LAYERS, t.layered, { ...toneUniforms, uCoverage: { texture: src.texture }, uApplyLimit: limitOn });
+      return t.layered;
+    }
+    t.layerA = this.gpu.ensureTarget(t.layerA, w, h, "coverage");
+    t.layerB = this.gpu.ensureTarget(t.layerB, w, h, "coverage");
+    this.gpu.pass(LAYERS, t.layerA, { ...toneUniforms, uCoverage: { texture: src.texture }, uApplyLimit: 0 });
+    this.gpu.pass(LAYERS_TRAP, t.layerB, { ...common, uCoverage: { texture: t.layerA.texture }, uDir: [1, 0], uRadius: radius, uApplyLimit: 0 });
+    this.gpu.pass(LAYERS_TRAP, t.layered, { ...common, uCoverage: { texture: t.layerB.texture }, uDir: [0, 1], uRadius: radius, uApplyLimit: limitOn });
     return t.layered;
   }
 
@@ -709,7 +801,7 @@ export class Pipeline {
     const sigmaImage = (a.smoothing * Math.max(W, H)) / 1000;
     const adjusted = this.adjustPasses(a, t.source, t, sigmaImage * (w / region.width));
     const coverage = this.splitPass(inputs, adjusted, t, texelScale);
-    const layered = this.layersPass(inputs.layerUniforms, coverage, t);
+    const layered = this.layersPass(inputs.layers, coverage, t, texelScale);
     const visible = options.visible ?? [1, 1, 1, 1];
     const mixed = options.mix ? this.mixPass(inputs.inkUniforms, visible, layered, t.source, t) : null;
     return { source: t.source, layered, mixed };

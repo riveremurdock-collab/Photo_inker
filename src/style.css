@@ -1058,6 +1058,23 @@ input.swatch-input {
   font-size: 11px;
 }
 
+/* ---- Layers: collapsible levels / curve / trapping ---- */
+
+.layer-more {
+  font-size: 12px;
+}
+
+.layer-more summary {
+  cursor: pointer;
+  color: var(--color-olive);
+  font-weight: 500;
+}
+
+.layer-more[open] {
+  display: grid;
+  gap: 8px;
+}
+
 /* ---- Step 8: Tone Map curves, Channel Split, Selective Color ---- */
 
 .tone-curves,

@@ -14,8 +14,8 @@
 | — | *End of basic build: overall report* | ✅ Given 2026-09-29 |
 | 7 | Full palette options | ✅ Done |
 | 8 | Remaining color splitting methods | ✅ Done |
-| 9 | Complete shared layer options | ⏳ Next |
-| 10 | Remaining halftone types | — |
+| 9 | Complete shared layer options | ✅ Done |
+| 10 | Remaining halftone types | ⏳ Next |
 | 11 | Border | — |
 | 12 | Print simulation | — |
 | 13 | Full export options | — |
@@ -212,6 +212,20 @@
   - The detail is screened onto the detail ink ("auto" = darkest).
   - Export tiles add the blur radius as margin.
 - **Eyedropper:** now supports custom targets (used by Selective Color).
+
+### Step 9
+- **Layer stage order:** tone (invert → levels → curve → density, one 256-entry table per ink) → knockout → choke/spread → total ink limit.
+- **Per-layer levels:** "ink starts at" / "full ink at" / midtone (gamma `2^(v/50)`) act on coverage. There is also a per-layer point curve. Both sit in a collapsible "Levels, curve, trapping" area on each layer row.
+- **Knockout:** per layer ("KO" toggle). The layer clears the layers printed before it, in proportion to its own coverage. Layers are processed top-down, so a layer that's already cleared only knocks out where it still prints.
+- **Choke / spread:**
+  - Per layer, in output px (−8 to +8), done as a separable max/min filter in two passes. Fractional radii blend the last pixel.
+  - Applied after knockout, so spreading a lower layer fills the gap a knockout leaves.
+  - The radius (converted to image px) is added to the detail-view and export-tile margins.
+- **Total ink limit:** 100–400% (400% = off). When the combined coverage is over the limit, all inks are scaled down proportionally.
+- **Measured (smooth riso export, 4 inks, scene image):**
+  - Knockout: yellow over 50% reduced blue under it from 0.79 to 0.05, and left black (printed after) unchanged.
+  - Spread +4 / choke −4 px: black coverage 0.126 → 0.186 / 0.081.
+  - Ink limit 150%: max combined coverage 262% → 151%.
 
 ## Open questions
 

@@ -1,17 +1,33 @@
 // Layers (shared options for every splitting method): one row per ink, in
-// print order, with density, invert, solo/mute (preview only), and ▲/▼ to
-// change print order.
+// print order, with density, invert, knockout, solo/mute (preview only), ▲/▼
+// to change print order, and a collapsible area for levels, curve, and
+// choke/spread (trapping).
 
 import type { PaletteActions } from "../../app/palette";
 import type { SettingsStore } from "../../app/store";
+import { findSetting } from "../../schema/registry";
+import type { SettingDef } from "../../schema/types";
+import { createControl, type Control } from "../controls/controls";
+
+/** Per-layer settings shown in each layer's collapsible area. */
+const MORE_KEYS = ["levelsBlack", "levelsWhite", "levelsMid", "curve", "trap"] as const;
+const MORE_LABELS: Record<(typeof MORE_KEYS)[number], string> = {
+  levelsBlack: "Levels: ink starts at",
+  levelsWhite: "Levels: full ink at",
+  levelsMid: "Levels: midtone",
+  curve: "Curve",
+  trap: "Choke (−) / spread (+)",
+};
 
 interface Row {
   element: HTMLElement;
   density: HTMLInputElement;
   densityNumber: HTMLInputElement;
   invert: HTMLButtonElement;
+  knockout: HTMLButtonElement;
   solo: HTMLButtonElement;
   mute: HTMLButtonElement;
+  more: { key: (typeof MORE_KEYS)[number]; control: Control }[];
 }
 
 function toggleButton(text: string, title: string): HTMLButtonElement {
@@ -37,6 +53,7 @@ export function createLayersBlock(store: SettingsStore, actions: PaletteActions)
 
   let signature = "";
   let rows: Row[] = [];
+  const openMore = new Set<number>();
 
   function build(): void {
     const p = store.get().palette;
@@ -65,6 +82,10 @@ export function createLayersBlock(store: SettingsStore, actions: PaletteActions)
       const solo = toggleButton("S", `Solo layer ${slot + 1} (preview only)`);
       solo.addEventListener("click", () => store.setInkValue("layers", "solo", slot, !store.get().layers.solo[slot]));
       const mute = toggleButton("M", `Mute layer ${slot + 1} (preview only)`);
+      const knockout = toggleButton("KO", `Knockout: layer ${slot + 1} clears the layers printed before it where it has ink`);
+      knockout.addEventListener("click", () =>
+        store.setInkValue("layers", "knockout", slot, !store.get().layers.knockout[slot]),
+      );
       mute.addEventListener("click", () => store.setInkValue("layers", "mute", slot, !store.get().layers.mute[slot]));
 
       const move = document.createElement("span");
@@ -87,7 +108,7 @@ export function createLayersBlock(store: SettingsStore, actions: PaletteActions)
       down.addEventListener("click", () => actions.moveInk(slot, 1));
       move.append(up, down);
 
-      head.append(order, name, invert, solo, mute, move);
+      head.append(order, name, invert, knockout, solo, mute, move);
 
       const densityRow = document.createElement("label");
       densityRow.className = "layer-density";
@@ -116,9 +137,31 @@ export function createLayersBlock(store: SettingsStore, actions: PaletteActions)
       pct.textContent = "%";
       densityRow.append(densityLabel, density, densityNumber, pct);
 
-      li.append(head, densityRow);
+      // Levels, curve, and trapping, in a collapsible area.
+      const details = document.createElement("details");
+      details.className = "layer-more";
+      details.open = openMore.has(slot);
+      details.addEventListener("toggle", () => (details.open ? openMore.add(slot) : openMore.delete(slot)));
+      const summary = document.createElement("summary");
+      summary.textContent = "Levels, curve, trapping";
+      details.append(summary);
+      const more: Row["more"] = [];
+      const values = store.get().layers as unknown as Record<string, unknown[]>;
+      for (const key of MORE_KEYS) {
+        const def = findSetting("layers", key)!;
+        const scalar = { ...def, perInk: false, hidden: false, help: undefined } as SettingDef;
+        const control = createControl(scalar, values[key]?.[slot], (v, commit) => store.setInkValue("layers", key, slot, v, { commit }), MORE_LABELS[key]);
+        details.append(control.element);
+        more.push({ key, control });
+      }
+      const trapHelp = document.createElement("p");
+      trapHelp.className = "control-help";
+      trapHelp.textContent = "In output pixels. Spread a lower layer (or choke a knockout layer) so small registration shifts don't leave paper gaps.";
+      details.append(trapHelp);
+
+      li.append(head, densityRow, details);
       list.append(li);
-      rows.push({ element: li, density, densityNumber, invert, solo, mute });
+      rows.push({ element: li, density, densityNumber, invert, knockout, solo, mute, more });
     }
   }
 
@@ -141,6 +184,9 @@ export function createLayersBlock(store: SettingsStore, actions: PaletteActions)
       set(row.invert, Boolean(layers.invert[slot]));
       set(row.solo, Boolean(layers.solo[slot]));
       set(row.mute, Boolean(layers.mute[slot]));
+      set(row.knockout, Boolean(layers.knockout[slot]));
+      const values = layers as unknown as Record<string, unknown[]>;
+      for (const { key, control } of row.more) control.update(values[key]?.[slot]);
       const hidden = anySolo ? !layers.solo[slot] : Boolean(layers.mute[slot]);
       row.element.classList.toggle("layer-hidden", hidden);
     });

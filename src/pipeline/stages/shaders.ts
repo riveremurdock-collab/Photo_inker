@@ -92,15 +92,71 @@ void main() {
 `;
 
 /** Shared layer options: invert, then density. Channels beyond the ink count are zeroed. */
+/**
+ * Shared layer options, per pixel:
+ * - tone per layer (invert → levels → curve → density), one lookup table per ink channel;
+ * - knockout: a knockout layer clears the layers printed before it (lower index) where it has ink;
+ * - total ink limit (when there's no trapping pass after this one).
+ */
 export const LAYERS = /* glsl */ `${HEADER}
 uniform sampler2D uCoverage;
-uniform vec4 uDensity;
-uniform vec4 uInvert;
+uniform sampler2D uTone;     // 256 × 1, one ink per channel
 uniform vec4 uActive;
+uniform vec4 uKnockout;
+uniform float uLimit;        // total ink limit (sum of coverages), e.g. 2.5 = 250%
+uniform int uApplyLimit;
+float tone(float c, int ink) { return texture(uTone, vec2((clamp(c, 0.0, 1.0) * 255.0 + 0.5) / 256.0, 0.5))[ink]; }
 void main() {
-  vec4 cov = texture(uCoverage, gl_FragCoord.xy / uSize);
-  cov = mix(cov, 1.0 - cov, uInvert);
-  outColor = clamp(cov * uDensity, 0.0, 1.0) * uActive;
+  vec4 c = texture(uCoverage, gl_FragCoord.xy / uSize);
+  vec4 t = vec4(tone(c.r, 0), tone(c.g, 1), tone(c.b, 2), tone(c.a, 3)) * uActive;
+  // Top layer first, so a layer already cleared by one above it only knocks out where it still prints.
+  for (int i = 3; i >= 1; i--) {
+    if (uKnockout[i] < 0.5) continue;
+    for (int j = 0; j < 4; j++) if (j < i) t[j] *= 1.0 - t[i];
+  }
+  if (uApplyLimit == 1) {
+    float sum = t.r + t.g + t.b + t.a;
+    if (sum > uLimit) t *= uLimit / sum;
+  }
+  outColor = t;
+}
+`;
+
+/**
+ * Choke or spread (trapping), one direction per pass (run horizontally then
+ * vertically). Positive radius grows a layer's ink (spread), negative shrinks
+ * it (choke). Fractional radii blend in the last pixel, so small traps still show.
+ * The second pass can also apply the total ink limit.
+ */
+export const LAYERS_TRAP = /* glsl */ `${HEADER}
+uniform sampler2D uCoverage;
+uniform vec2 uDir;
+uniform vec4 uRadius;        // texels, per ink
+uniform float uLimit;
+uniform int uApplyLimit;
+void main() {
+  vec2 px = 1.0 / uSize;
+  vec2 uv = gl_FragCoord.xy * px;
+  vec4 c0 = texture(uCoverage, uv);
+  vec4 grow = c0;
+  vec4 shrink = c0;
+  vec4 r = abs(uRadius);
+  float reach = ceil(max(max(r.x, r.y), max(r.z, r.w)));
+  for (int k = 1; k <= 24; k++) {
+    float d = float(k);
+    if (d > reach) break;
+    vec4 w = clamp(r - d + 1.0, 0.0, 1.0); // 1 inside the radius, partial at its edge
+    vec4 a = mix(c0, texture(uCoverage, uv + uDir * d * px), w);
+    vec4 b = mix(c0, texture(uCoverage, uv - uDir * d * px), w);
+    grow = max(grow, max(a, b));
+    shrink = min(shrink, min(a, b));
+  }
+  vec4 t = mix(shrink, grow, step(0.0, uRadius));
+  if (uApplyLimit == 1) {
+    float sum = t.r + t.g + t.b + t.a;
+    if (sum > uLimit) t *= uLimit / sum;
+  }
+  outColor = t;
 }
 `;
 
