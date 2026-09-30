@@ -38,7 +38,7 @@ export type PngColor = "gray" | "rgb";
 
 export class PngEncoder {
   private compressed: Uint8Array[] = [];
-  private writer: WritableStreamDefaultWriter<Uint8Array>;
+  private writer: WritableStreamDefaultWriter<BufferSource>;
   private reading: Promise<void>;
   private channels: number;
   private rowsWritten = 0;
