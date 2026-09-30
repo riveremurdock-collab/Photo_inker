@@ -4,16 +4,19 @@
 // - Blue noise: nudges differ sharply between neighbors (even, grainy).
 // - Pink noise: neighboring nudges are similar (wavy rows).
 // - Green noise: dots gather into clusters of a chosen size (clumpy).
-// The nudge pattern is a 64 × 64 tile that repeats; each ink reads it at its
-// own offset (from the seed), so layers are placed independently.
+// The nudge field (engine/halftone/noiseField.ts) is 1024 × 1024 cells, built
+// in a worker, so it never visibly repeats; each ink reads it at its own
+// offset (from the seed), so layers are placed independently. The noise
+// amount only scales the nudges in the shader, so changing it is instant.
 
-import { voidAndCluster } from "../../engine/halftone/voidAndCluster";
+import { NOISE_FIELD_SIZE, type NoiseKind } from "../../engine/halftone/noiseField";
 import { defineSection } from "../../schema/types";
 import { createRng } from "../../util/rng";
-import { floatTexture, GLSL_LATTICE, GLSL_LATTICE_HT, latticeDotSettings, latticeUniforms, measureThresholds, type LatticeShape } from "./lattice";
+import { halftoneWorker } from "./halftoneWorker";
+import { GLSL_LATTICE, GLSL_LATTICE_HT, latticeDotSettings, latticeUniforms, measureThresholds, type LatticeShape } from "./lattice";
 import { defineHalftoneMethod } from "./types";
 
-const TILE = 64;
+const TILE = NOISE_FIELD_SIZE;
 
 export const amNoiseSection = defineSection({
   id: "halftoneNoise",
@@ -55,76 +58,13 @@ export const amNoiseSection = defineSection({
 
 interface NoiseTile {
   key: string;
-  /** TILE × TILE × 4 floats: x and y nudge per cell (lattice units), then two unused. */
-  data: Float32Array;
+  /** TILE × TILE × 2 bytes: x and y nudge per cell, round((nudge + 0.5) × 255). */
+  data: Uint8Array;
 }
 
-let blueRanks: Float32Array | null = null;
+const nudge = (v: number) => v / 255 - 0.5;
 
-/** Builds the nudge tile for the settings. */
-async function buildTile(noise: string, amount: number, cluster: number, seed: number): Promise<NoiseTile> {
-  const rng = createRng(seed * 977 + 13);
-  const n = TILE * TILE;
-  const ox = new Float32Array(n);
-  const oy = new Float32Array(n);
-  if (noise === "blue") {
-    blueRanks ??= await voidAndCluster(TILE, 1.5);
-    // Two unrelated places in the same blue noise map give independent x and y nudges.
-    const sx = Math.floor(rng() * TILE);
-    const sy = Math.floor(rng() * TILE);
-    for (let y = 0; y < TILE; y++) {
-      for (let x = 0; x < TILE; x++) {
-        ox[y * TILE + x] = blueRanks![((y + sy) % TILE) * TILE + ((x + sx) % TILE)]! - 0.5;
-        oy[y * TILE + x] = blueRanks![((y + sy + 32) % TILE) * TILE + ((x + sx + 21) % TILE)]! - 0.5;
-      }
-    }
-  } else if (noise === "pink") {
-    // White noise, blurred (wrapping around the tile), then scaled to ±0.5.
-    const wx = Float32Array.from({ length: n }, () => rng() - 0.5);
-    const wy = Float32Array.from({ length: n }, () => rng() - 0.5);
-    const blur = (src: Float32Array, out: Float32Array) => {
-      const r = 3;
-      for (let y = 0; y < TILE; y++) {
-        for (let x = 0; x < TILE; x++) {
-          let s = 0;
-          let w = 0;
-          for (let dy = -r; dy <= r; dy++) {
-            for (let dx = -r; dx <= r; dx++) {
-              const k = Math.exp(-(dx * dx + dy * dy) / 4.5);
-              s += k * src[((y + dy + TILE) % TILE) * TILE + ((x + dx + TILE) % TILE)]!;
-              w += k;
-            }
-          }
-          out[y * TILE + x] = s / w;
-        }
-      }
-      let max = 1e-6;
-      for (const v of out) max = Math.max(max, Math.abs(v));
-      for (let i = 0; i < n; i++) out[i] = (out[i]! / max) * 0.5;
-    };
-    blur(wx, ox);
-    blur(wy, oy);
-  } else {
-    // Green: pull each dot toward the center of its cluster of cells.
-    for (let y = 0; y < TILE; y++) {
-      for (let x = 0; x < TILE; x++) {
-        const cx = (Math.floor(x / cluster) + 0.5) * cluster - 0.5;
-        const cy = (Math.floor(y / cluster) + 0.5) * cluster - 0.5;
-        ox[y * TILE + x] = Math.max(-0.5, Math.min(0.5, (cx - x) * 0.45 + (rng() - 0.5) * 0.2));
-        oy[y * TILE + x] = Math.max(-0.5, Math.min(0.5, (cy - y) * 0.45 + (rng() - 0.5) * 0.2));
-      }
-    }
-  }
-  const data = new Float32Array(n * 4);
-  const a = amount / 100;
-  for (let i = 0; i < n; i++) {
-    data[i * 4] = ox[i]! * a;
-    data[i * 4 + 1] = oy[i]! * a;
-  }
-  return { key: `${noise}|${amount}|${cluster}|${seed}`, data };
-}
-
-function nearestIn(tile: Float32Array) {
+function nearestIn(tile: Uint8Array, amount: number) {
   return (x: number, y: number): [number, number] => {
     const bx = Math.floor(x);
     const by = Math.floor(y);
@@ -135,8 +75,8 @@ function nearestIn(tile: Float32Array) {
         const cx = bx + dx;
         const cy = by + dy;
         const i = (((cy % TILE) + TILE) % TILE) * TILE + (((cx % TILE) + TILE) % TILE);
-        const px = cx + 0.5 + tile[i * 4]!;
-        const py = cy + 0.5 + tile[i * 4 + 1]!;
+        const px = cx + 0.5 + nudge(tile[i * 2]!) * amount;
+        const py = cy + 0.5 + nudge(tile[i * 2 + 1]!) * amount;
         const d = (x - px) ** 2 + (y - py) ** 2;
         if (d < bestD) {
           bestD = d;
@@ -152,11 +92,21 @@ export const amNoise = defineHalftoneMethod({
   id: "noise",
   label: "AM: noise grid",
   section: amNoiseSection,
-  prepareKey: (values) => `${values.noise}|${values.amount}|${values.cluster}|${values.seed}`,
-  prepare: (values) => buildTile(String(values.noise), Number(values.amount), Number(values.cluster), Number(values.seed)),
+  prepareKey: (values) => tileKey(values as never),
+  async prepare(values): Promise<NoiseTile> {
+    const result = await halftoneWorker("noise").run({
+      kind: "noiseField",
+      noise: String(values.noise) as NoiseKind,
+      cluster: Number(values.cluster),
+      seed: Number(values.seed),
+    });
+    if (result.kind !== "noiseField") throw new Error("unexpected worker result");
+    return { key: tileKey(values as never), data: result.data };
+  },
   glsl: /* glsl */ `
 ${GLSL_LATTICE}
-uniform sampler2D uNoiseTile;   // ${TILE} × ${TILE}, xy = nudge per cell
+uniform sampler2D uNoiseTile;   // ${TILE} × ${TILE}, RG8: nudge per cell + 0.5
+uniform float uNoiseAmount;
 uniform vec2 uNoiseShift[4];    // per-ink offset into the tile (cells)
 vec2 latToLattice(int ink, vec2 p) { return p / uLatSize[ink] + uNoiseShift[ink]; }
 vec2 latFromLattice(int ink, vec2 q) { return (q - uNoiseShift[ink]) * uLatSize[ink]; }
@@ -167,7 +117,7 @@ vec2 latNearest(int ink, vec2 q) {
   for (int dy = -1; dy <= 1; dy++) {
     for (int dx = -1; dx <= 1; dx++) {
       vec2 cell = b + vec2(float(dx), float(dy));
-      vec2 o = texelFetch(uNoiseTile, ivec2(mod(cell, ${TILE}.0)), 0).xy;
+      vec2 o = (texelFetch(uNoiseTile, ivec2(mod(cell, ${TILE}.0)), 0).xy - 0.5) * uNoiseAmount;
       vec2 c = cell + 0.5 + o;
       float d = dot(q - c, q - c);
       if (d < bestD) { bestD = d; best = c; }
@@ -178,18 +128,42 @@ vec2 latNearest(int ink, vec2 q) {
 ${GLSL_LATTICE_HT}
 `,
   uniforms(values, ctx, tile) {
-    const data = tile?.data ?? new Float32Array(TILE * TILE * 4);
+    const data = tile?.data ?? emptyTile;
     const key = tile?.key ?? "none";
+    const amount = Number(values.amount) / 100;
     const rng = createRng(Number(values.seed) * 31 + 7);
     const shift: number[] = [];
     for (let i = 0; i < 4; i++) shift.push(Math.floor(rng() * TILE), Math.floor(rng() * TILE));
     return {
       ...latticeUniforms(values as never, ctx, "cellSize", null, {
-        key: `noise:${key}`,
-        measure: () => measureThresholds(nearestIn(data), (values as unknown as { shape: LatticeShape }).shape, (r) => [r() * TILE, r() * TILE]),
+        key: `noise:${key}|${amount}`,
+        measure: () => measureThresholds(nearestIn(data, amount), (values as unknown as { shape: LatticeShape }).shape, (r) => [r() * TILE, r() * TILE]),
       }),
-      uNoiseTile: { texture: floatTexture(ctx.gpu, `noiseTile:${key}`, TILE, TILE, data, 4) },
+      uNoiseTile: { texture: tileTexture(ctx.gpu.gl, data) },
+      uNoiseAmount: amount,
       uNoiseShift: shift,
     };
   },
 });
+
+function tileKey(values: { noise: unknown; cluster: unknown; seed: unknown }): string {
+  // Cluster size only matters for green noise.
+  return `${values.noise}|${values.noise === "green" ? values.cluster : 0}|${values.seed}`;
+}
+
+/** Neutral field (no nudges) until the worker's field arrives. */
+const emptyTile = new Uint8Array(TILE * TILE * 2).fill(128);
+const tileTextures = new WeakMap<Uint8Array, WebGLTexture>();
+
+function tileTexture(gl: WebGL2RenderingContext, data: Uint8Array): WebGLTexture {
+  let texture = tileTextures.get(data);
+  if (texture) return texture;
+  texture = gl.createTexture()!;
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 2);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG8, TILE, TILE, 0, gl.RG, gl.UNSIGNED_BYTE, data);
+  tileTextures.set(data, texture);
+  return texture;
+}

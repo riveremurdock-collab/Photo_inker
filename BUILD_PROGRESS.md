@@ -234,7 +234,10 @@
   - Tone is exact for any grid and dot shape (round, square, ellipse, diamond, line). A 256-step threshold table per grid + shape is measured once by sampling 64k points, so a 30% tone inks 30% of the area.
   - Shared per-ink dot settings: maximum dot, shape, and a dot size curve.
 - **Hex:** cell size is scaled so a hex cell has the same area (dot density) as a square cell of that size. Angles repeat every 60°; defaults are 0/30/15/45° (15° apart, the most two hex screens can differ).
-- **Noise grid:** one dot per cell of a square grid, nudged by a 64 × 64 repeating noise tile; each ink reads the tile at its own seeded offset.
+- **Noise grid:** one dot per cell of a square grid, nudged by a noise field; each ink reads the field at its own seeded offset.
+  - *Fix after review:* the first version used a 64 × 64-cell tile that visibly repeated, and green noise pulled dots toward clusters on a regular grid (a repeating 3 × 3 look). The field is now 1024 × 1024 cells, built in the halftone worker (`engine/halftone/noiseField.ts`), so it doesn't repeat within 8192 px at 8 px spacing.
+  - Blue = high-passed white noise; pink = smooth noise summed over scales 2–256 cells (1/f); both rank-equalized. Green = dots pushed up the slope of a smooth random field, so they gather at randomly placed hilltops about one cluster size apart, with the move's length clamped to half a cell.
+  - Noise amount is now a shader uniform (no rebuild). Builds take 0.2–1.1 s in the worker.
 - **Spiral:**
   - The point table is built in a worker, sized to reach the output's farthest corner, and bucketed for GPU lookup.
   - Divergence 137.5° (the default, and anything that rounds to it) uses the true golden angle, 137.5078°. Exactly 137.5° is 55/144 of a turn, which lines points up into 144 visible spokes away from the center.

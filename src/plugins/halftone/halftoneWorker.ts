@@ -5,7 +5,7 @@ import { WorkerClient } from "../../workers/workerClient";
 
 const clients = new Map<string, WorkerClient<HalftoneJob, HalftoneJobResult>>();
 
-export function halftoneWorker(purpose: "preview" | "export" | "spiral"): WorkerClient<HalftoneJob, HalftoneJobResult> {
+export function halftoneWorker(purpose: "preview" | "export" | "spiral" | "noise"): WorkerClient<HalftoneJob, HalftoneJobResult> {
   let client = clients.get(purpose);
   if (!client) {
     client = new WorkerClient(new Worker(new URL("../../workers/halftone.worker.ts", import.meta.url), { type: "module" }));
