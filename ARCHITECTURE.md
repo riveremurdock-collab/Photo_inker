@@ -101,9 +101,13 @@ interface HalftoneMethod<Sec extends SectionSchema, P> {
   id: string; label: string;
   section: Sec;                    // its settings (parent "halftone"); per-ink ones use perInk
   glsl: string;                    // defines htSamplePoint(ink, p) and htInk(ink, p, coverage)
-  prepareKey?(values): string;     // optional worker job (e.g. a threshold map), cached by key
-  prepare?(values): Promise<P>;
-  uniforms(values, ctx: HalftoneContext, prepared?: P): Record<string, UniformValue>;
+  prepareKey?(values, info: OutputInfo): string;  // optional worker job (e.g. a threshold map), cached by key
+  prepare?(values, info: OutputInfo): Promise<P>;
+  fromCoverage?: {                 // whole-image methods (Step 10: error diffusion)
+    cell(values, ctx): number;     // output px per bitmap cell
+    build(values, coverage, w, h, inkCount, purpose: "preview" | "export"): Promise<Uint8Array>;
+  };
+  uniforms(values, ctx: HalftoneContext, prepared?: P, bitmap?: CoverageBitmap): Record<string, UniformValue>;
 }
 ```
 
@@ -116,6 +120,9 @@ interface HalftoneMethod<Sec extends SectionSchema, P> {
 - `SplitContext` carries the GPU, inks, paper, and overlap table, so Ink Matching solves against exactly what the preview shows.
 - **Detail Split (Step 8)** calls another registered `SplitMethod` for its base layers.
 - **Whole-image analysis.** Luminance and Sobel gradient are computed once per adjusted image, lazily, through `HalftoneContext.analysis()`, and shared by every layer. The basic AM/FM types don't need it; structure-aware types will.
+- **Halftone types (Step 10).**
+  - Non-square AM grids (hex, noise, spiral, rings) share `plugins/halftone/lattice.ts`. A grid only defines `latToLattice`, `latFromLattice` and `latNearest` in GLSL (plus the same nearest-center search in TS). Exact tone comes from a threshold table measured by sampling the grid (`measureThresholds`), cached per grid + dot shape.
+  - Whole-image methods (`fromCoverage`) are fed by the pipeline: it reads the coverage back at the method's cell size, the method builds a bitmap in a worker, and its GLSL draws from the bitmap texture. Export rebuilds the bitmap at full output resolution. `halftoneWorker(purpose)` keeps preview and export on separate workers.
 - **Minimum dot size and drop-out/round-up** are shared halftone settings, applied by the halftone stage around the plugin rather than by each plugin.
 
 ## 5. Pipeline
@@ -200,7 +207,7 @@ This follows the outline's Rendering Engine section.
 - `export/exporter.ts` renders the output pixel grid in 2048 px tiles.
   - For each tile, `Pipeline.renderRegion()` reruns copy → adjust → split → layer options for the matching image area (plus a margin), from the full-size source, at min(output, source) resolution. It is the same function the zoom detail view uses.
   - An output pass (`export/shaders.ts`) then writes either Digital color (the halftone method's GLSL with 2×2 samples per pixel, like the preview at 100%) or Riso layers (one ink per channel, 1 sample per pixel, so pure black/white; smooth for None).
-- Strips of tiles stream into `export/png.ts` (our streaming PNG encoder, fflate zlib, pHYs DPI, sRGB chunk) or into a canvas for JPG. Riso PNGs are zipped with fflate.
+- Strips of tiles stream into `export/png.ts` (our streaming PNG encoder: the browser's `CompressionStream("deflate")`, pHYs DPI, sRGB chunk; fflate's streaming zlib was dropped in Step 10 after it produced corrupt data) or into a canvas for JPG. Riso PNGs are zipped with fflate.
 - File names: `Project.png` / `Project.jpg`; `Project_01_0078BF.png` … in print order, inside `Project_riso_layers.zip`.
 
 ## 7. Website embedding

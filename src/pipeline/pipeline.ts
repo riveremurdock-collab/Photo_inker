@@ -24,7 +24,7 @@ import { Gpu, type Target, type UniformValue } from "../engine/gl/gpu";
 import { LIGHTNESS_SOURCES } from "../engine/gl/program";
 import { inkSetupFrom, OverlapTableCache } from "../engine/spectral/overlapTable";
 import { halftoneMethod } from "../plugins/halftone/registry";
-import type { HalftoneContext, HalftoneMethod } from "../plugins/halftone/types";
+import type { CoverageBitmap, HalftoneContext, HalftoneMethod } from "../plugins/halftone/types";
 import { splitMethod } from "../plugins/splitting/registry";
 import type { SplitContext, SplitMethod } from "../plugins/splitting/types";
 import type { ProjectSettings } from "../schema/sections";
@@ -46,6 +46,8 @@ const SOURCE_TEXTURE_CAP = 8192;
  */
 const MAX_WORKING_EDGE = 4096;
 const HISTOGRAM_SIZE = 256;
+/** Longest edge (cells) of whole-image halftone bitmaps (error diffusion) in the preview. */
+const PREVIEW_BITMAP_EDGE = 2048;
 /** Largest detail render, in pixels (about a 4K screen). */
 const MAX_DETAIL_PIXELS = 3840 * 2400;
 
@@ -149,6 +151,9 @@ export class Pipeline {
   private preparing: string | null = null;
   private halftonePrepared: Prepared | null = null;
   private halftonePreparing: string | null = null;
+  private bitmap: { key: string; methodId: string; value: CoverageBitmap; id: number } | null = null;
+  private bitmapBuilding: string | null = null;
+  private coverageRead: Target | null = null;
   private preparedCount = 0;
 
   private compositor: Compositor;
@@ -641,17 +646,22 @@ export class Pipeline {
     }
 
     const values = (settings as unknown as Record<string, Record<string, unknown>>)[method.section.id] as never;
+    const outW = Math.round(imageWidth * scale);
+    const info = { outputWidth: outW, outputHeight: Math.max(1, Math.round((outW * imageHeight) / imageWidth)) };
+    const showSmoothMeanwhile = () => {
+      this.halftoned = false;
+      this.keys.delete("halftone");
+      this.showMixed();
+      return true;
+    };
+
     let prepared: unknown;
     let preparedId = 0;
     if (method.prepare && method.prepareKey) {
-      const pkey = `${method.id}|${method.prepareKey(values)}`;
-      if (this.halftonePrepared?.key !== pkey && this.halftonePreparing !== pkey) this.startHalftonePrepare(pkey, method, values);
-      if (!this.halftonePrepared || this.halftonePrepared.methodId !== method.id) {
-        // Nothing to show yet for this method: show smooth inks meanwhile.
-        this.halftoned = false;
-        this.showMixed();
-        return true;
-      }
+      const pkey = `${method.id}|${method.prepareKey(values, info)}`;
+      if (this.halftonePrepared?.key !== pkey && this.halftonePreparing !== pkey) this.startHalftonePrepare(pkey, method, values, info);
+      // Nothing to show yet for this method: show smooth inks meanwhile.
+      if (!this.halftonePrepared || this.halftonePrepared.methodId !== method.id) return showSmoothMeanwhile();
       prepared = this.halftonePrepared.value;
       preparedId = this.halftonePrepared.id;
     }
@@ -662,14 +672,33 @@ export class Pipeline {
       inkCount: n,
       minDot: settings.halftone.minDot.slice(0, MAX_INKS),
       minDotMode: settings.halftone.minDotMode as "drop" | "round",
+      outputWidth: info.outputWidth,
+      outputHeight: info.outputHeight,
       analysis: () => this.analysis(),
     };
-    const key = [method.id, JSON.stringify(values), JSON.stringify(settings.halftone), scale, preparedId, this.version("mix")].join("|");
+
+    // Types built from the whole image's coverage (error diffusion).
+    let bitmapId = 0;
+    if (method.fromCoverage) {
+      const cell = method.fromCoverage.cell(values, ctx);
+      let gw = Math.ceil(info.outputWidth / cell);
+      let gh = Math.ceil(info.outputHeight / cell);
+      // The preview caps the grid; the dots are then drawn a bit larger than in the export.
+      const k = Math.min(1, PREVIEW_BITMAP_EDGE / Math.max(gw, gh));
+      gw = Math.max(1, Math.round(gw * k));
+      gh = Math.max(1, Math.round(gh * k));
+      const bkey = [method.id, JSON.stringify(values), gw, gh, n, this.version("layerOptions")].join("|");
+      if (this.bitmap?.key !== bkey && this.bitmapBuilding !== bkey) this.startBitmap(bkey, method, values, gw, gh, info.outputWidth / gw, n);
+      if (!this.bitmap || this.bitmap.methodId !== method.id) return showSmoothMeanwhile();
+      bitmapId = this.bitmap.id;
+    }
+
+    const key = [method.id, JSON.stringify(values), JSON.stringify(settings.halftone), scale, preparedId, bitmapId, this.version("mix")].join("|");
     return this.stage("halftone", key, () => {
       this.halftoned = true;
       this.clearDetail();
-      const methodUniforms = method.uniforms(values, ctx, prepared as never);
-      this.halftoneState = { method, methodUniforms, reach: halftoneReach(values) };
+      const methodUniforms = method.uniforms(values, ctx, prepared as never, this.bitmap?.value);
+      this.halftoneState = { method, methodUniforms, reach: halftoneReach(values), values, ctx, prepared };
       this.compositor.set({
         method,
         methodUniforms,
@@ -686,10 +715,45 @@ export class Pipeline {
     });
   }
 
-  private startHalftonePrepare(pkey: string, method: HalftoneMethod, values: never): void {
+  /** Builds an error-diffusion style bitmap from the current coverage, at gw × gh cells. */
+  private startBitmap(key: string, method: HalftoneMethod, values: never, gw: number, gh: number, cell: number, inkCount: number): void {
+    this.bitmapBuilding = key;
+    this.setBusy("bitmap", "Diffusing…");
+    const coverage = this.readCoverage(this.main.layered!, gw, gh);
+    method
+      .fromCoverage!.build(values, coverage, gw, gh, inkCount, "preview")
+      .then((bits) => {
+        if (this.bitmapBuilding !== key) return;
+        this.bitmap = { key, methodId: method.id, value: { bits, width: gw, height: gh, cell }, id: ++this.preparedCount };
+        this.bitmapBuilding = null;
+        this.setBusy("bitmap", null);
+        this.schedule();
+      })
+      .catch((err: unknown) => {
+        if (!(err instanceof SupersededError)) console.error(err);
+        if (this.bitmapBuilding === key) {
+          this.bitmapBuilding = null;
+          this.setBusy("bitmap", null);
+        }
+      });
+  }
+
+  /** Resamples a coverage texture to w × h (area filter) and reads it back (RGBA bytes, row 0 = top). */
+  readCoverage(src: Target, w: number, h: number): Uint8Array {
+    this.coverageRead = this.gpu.ensureTarget(this.coverageRead, w, h, "coverage");
+    this.gpu.pass(COPY, this.coverageRead, {
+      uImage: { texture: src.texture },
+      uRatio: [src.width / w, src.height / h],
+      uRegion: [0, 0, 1, 1],
+      uSize: [w, h],
+    });
+    return this.gpu.read(this.coverageRead);
+  }
+
+  private startHalftonePrepare(pkey: string, method: HalftoneMethod, values: never, info: { outputWidth: number; outputHeight: number }): void {
     this.halftonePreparing = pkey;
-    this.setBusy("halftone", "Building blue noise map…");
-    method.prepare!(values)
+    this.setBusy("halftone", method.id === "spiral" ? "Building spiral…" : "Building halftone map…");
+    method.prepare!(values, info)
       .then((value) => {
         if (this.halftonePreparing !== pkey) return;
         this.halftonePrepared = { key: pkey, methodId: method.id, value, id: ++this.preparedCount };
@@ -818,7 +882,7 @@ export class Pipeline {
 
   /** True while ink matching or a halftone map is still being prepared. */
   get busy(): boolean {
-    return this.busyMessages.size > 0 || this.preparing !== null || this.halftonePreparing !== null;
+    return this.busyMessages.size > 0 || this.preparing !== null || this.halftonePreparing !== null || this.bitmapBuilding !== null;
   }
 
   /** What an export needs from the current state, or null if nothing is loaded yet. */
@@ -863,5 +927,12 @@ export interface ExportState {
   /** Extra margin (image px) the split method needs around a region. */
   splitReach: number;
   /** Null for halftone None. reach = how far (output px) the halftone looks for coverage. */
-  halftone: { method: HalftoneMethod; methodUniforms: Record<string, UniformValue>; reach: number } | null;
+  halftone: {
+    method: HalftoneMethod;
+    methodUniforms: Record<string, UniformValue>;
+    reach: number;
+    values: never;
+    ctx: HalftoneContext;
+    prepared: unknown;
+  } | null;
 }

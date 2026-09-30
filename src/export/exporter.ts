@@ -153,6 +153,70 @@ async function renderTiles(
   }
 }
 
+/**
+ * For halftone types built from the whole image (error diffusion): builds the
+ * bitmap at full output resolution. Coverage is gathered in bands of rows
+ * (the same passes as the preview, from the full-size image), then diffused
+ * in the export worker.
+ */
+async function prepareExportBitmap(
+  pipeline: Pipeline,
+  state: ExportState,
+  plan: ExportPlan,
+  progress: ExportProgress,
+  isCancelled: () => boolean,
+): Promise<{ state: ExportState; release: () => void }> {
+  const h = state.halftone;
+  if (!h?.method.fromCoverage) return { state, release: () => {} };
+  const cell = h.method.fromCoverage.cell(h.values, h.ctx);
+  const gw = Math.ceil(plan.width / cell);
+  const gh = Math.ceil(plan.height / cell);
+  if (Math.max(gw, gh) > state.gpu.maxTextureSize) {
+    throw new Error(`Error diffusion at this size needs a larger dot size (the dot grid would be ${gw} × ${gh}).`);
+  }
+  const ts = gw / state.imageWidth; // cells per image px
+  const sigmaImage = (state.smoothing * Math.max(state.imageWidth, state.imageHeight)) / 1000;
+  const margin = Math.ceil(((state.smoothing > 0 ? sigmaImage * 2.5 : 0) + state.splitReach + 2) * ts);
+  const coverage = new Uint8Array(gw * gh * 4);
+  const targets = emptyRegionTargets();
+  const band = 512;
+  try {
+    for (let gy0 = 0; gy0 < gh; gy0 += band) {
+      if (isCancelled()) throw new ExportCancelled();
+      const rows = Math.min(band, gh - gy0);
+      const top = Math.min(margin, gy0);
+      const bottom = Math.min(margin, gh - gy0 - rows);
+      const region = { x: 0, y: (gy0 - top) / ts, width: state.imageWidth, height: (rows + top + bottom) / ts };
+      const r = pipeline.renderRegion(region, ts, targets, { mix: false });
+      const pixels = state.gpu.read(r.layered);
+      const w = Math.min(gw, r.layered.width);
+      for (let y = 0; y < rows; y++) {
+        const srcRow = y + top;
+        if (srcRow >= r.layered.height) break;
+        coverage.set(pixels.subarray(srcRow * r.layered.width * 4, (srcRow * r.layered.width + w) * 4), (gy0 + y) * gw * 4);
+      }
+      progress((gy0 + rows) / gh / 3, "Preparing dithering…");
+      await nextFrame();
+    }
+  } finally {
+    pipeline.releaseTargets(targets);
+  }
+  progress(0.34, "Diffusing…");
+  const bits = await h.method.fromCoverage.build(h.values, coverage, gw, gh, state.inkCount, "export");
+  if (isCancelled()) throw new ExportCancelled();
+  const previewTextures = new Set(Object.values(h.methodUniforms).flatMap((v) => (typeof v === "object" && v && "texture" in v ? [v.texture] : [])));
+  const methodUniforms = h.method.uniforms(h.values, h.ctx, h.prepared as never, { bits, width: gw, height: gh, cell: plan.width / gw });
+  return {
+    state: { ...state, halftone: { ...h, methodUniforms } },
+    // Free the export-only bitmap texture afterwards.
+    release: () => {
+      for (const v of Object.values(methodUniforms)) {
+        if (typeof v === "object" && v && "texture" in v && !previewTextures.has(v.texture)) state.gpu.gl.deleteTexture(v.texture);
+      }
+    },
+  };
+}
+
 async function waitUntilReady(pipeline: Pipeline, progress: ExportProgress, isCancelled: () => boolean): Promise<ExportState> {
   pipeline.flush();
   while (pipeline.busy) {
@@ -172,8 +236,24 @@ export async function exportImage(
   progress: ExportProgress,
   isCancelled: () => boolean,
 ): Promise<ExportResult> {
-  const state = await waitUntilReady(pipeline, progress, isCancelled);
-  const plan = planExport(settings, state.imageWidth, state.imageHeight);
+  const ready = await waitUntilReady(pipeline, progress, isCancelled);
+  const plan = planExport(settings, ready.imageWidth, ready.imageHeight);
+  const { state, release } = await prepareExportBitmap(pipeline, ready, plan, progress, isCancelled);
+  try {
+    return await renderExport(pipeline, state, plan, settings, progress, isCancelled);
+  } finally {
+    release();
+  }
+}
+
+async function renderExport(
+  pipeline: Pipeline,
+  state: ExportState,
+  plan: ExportPlan,
+  settings: ProjectSettings,
+  progress: ExportProgress,
+  isCancelled: () => boolean,
+): Promise<ExportResult> {
   const name = fileBaseName(settings.upload.projectName);
 
   if (plan.kind === "digital") {
@@ -191,34 +271,36 @@ export async function exportImage(
       return { blob, fileName: `${name}.jpg` };
     }
     const png = new PngEncoder(plan.width, plan.height, "rgb");
-    await renderTiles(pipeline, state, plan, 0, (rgba, _y, rows) => {
+    await renderTiles(pipeline, state, plan, 0, async (rgba, _y, rows) => {
       const rgb = new Uint8Array(plan.width * rows * 3);
       for (let i = 0, j = 0; i < rgba.length; i += 4, j += 3) {
         rgb[j] = rgba[i]!;
         rgb[j + 1] = rgba[i + 1]!;
         rgb[j + 2] = rgba[i + 2]!;
       }
-      png.writeRows(rgb, rows);
+      await png.writeRows(rgb, rows);
     }, progress, isCancelled);
     progress(1, "Finishing PNG…");
-    return { blob: png.finish(), fileName: `${name}.png` };
+    return { blob: await png.finish(), fileName: `${name}.png` };
   }
 
   // Riso: one grayscale PNG per ink, in print order.
   const encoders = Array.from({ length: plan.inkCount }, () => new PngEncoder(plan.width, plan.height, "gray", plan.dpi ?? undefined));
-  await renderTiles(pipeline, state, plan, 1, (rgba, _y, rows) => {
+  await renderTiles(pipeline, state, plan, 1, async (rgba, _y, rows) => {
     const n = plan.width * rows;
-    encoders.forEach((png, ink) => {
-      const gray = new Uint8Array(n);
-      for (let i = 0; i < n; i++) gray[i] = rgba[i * 4 + ink]!;
-      png.writeRows(gray, rows);
-    });
+    await Promise.all(
+      encoders.map((png, ink) => {
+        const gray = new Uint8Array(n);
+        for (let i = 0; i < n; i++) gray[i] = rgba[i * 4 + ink]!;
+        return png.writeRows(gray, rows);
+      }),
+    );
   }, progress, isCancelled);
 
   progress(1, "Zipping layers…");
   const files: Record<string, Uint8Array> = {};
   for (let i = 0; i < encoders.length; i++) {
-    const blob = encoders[i]!.finish();
+    const blob = await encoders[i]!.finish();
     files[layerFileName(settings.upload.projectName, i + 1, settings.palette.inkColor[i] ?? "#000000")] = new Uint8Array(await blob.arrayBuffer());
   }
   // PNGs are already compressed; store them without recompressing.

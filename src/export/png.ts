@@ -2,8 +2,10 @@
 // (e.g. an A3 layer at 600 DPI) never has to exist uncompressed in memory.
 // Writes the resolution (pHYs) so print layers open at the right DPI, and
 // marks RGB images as sRGB.
-
-import { Zlib } from "fflate";
+//
+// Compression uses the browser's own CompressionStream("deflate") (zlib format).
+// fflate's streaming Zlib (0.8.3) produced corrupt streams for hard-to-compress
+// data pushed in many pieces ("invalid distance too far back").
 
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
@@ -36,7 +38,8 @@ export type PngColor = "gray" | "rgb";
 
 export class PngEncoder {
   private compressed: Uint8Array[] = [];
-  private zlib: Zlib;
+  private writer: WritableStreamDefaultWriter<Uint8Array>;
+  private reading: Promise<void>;
   private channels: number;
   private rowsWritten = 0;
   private done = false;
@@ -48,16 +51,25 @@ export class PngEncoder {
     private dpi?: number,
   ) {
     this.channels = color === "gray" ? 1 : 3;
-    this.zlib = new Zlib({ level: 6 });
-    this.zlib.ondata = (data) => this.compressed.push(data);
+    const stream = new CompressionStream("deflate");
+    this.writer = stream.writable.getWriter();
+    const reader = stream.readable.getReader();
+    this.reading = (async () => {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        this.compressed.push(value);
+      }
+    })();
   }
 
   /**
    * Adds rows (tightly packed, `channels` bytes per pixel, no filter byte).
    * Each row is stored with the PNG filter that usually compresses it best:
    * none for flat black-and-white layers, "sub" for photos.
+   * Resolves once the compressor is ready for more (backpressure).
    */
-  writeRows(pixels: Uint8Array, rowCount: number): void {
+  async writeRows(pixels: Uint8Array, rowCount: number): Promise<void> {
     const stride = this.width * this.channels;
     const filtered = new Uint8Array(rowCount * (stride + 1));
     for (let r = 0; r < rowCount; r++) {
@@ -74,14 +86,16 @@ export class PngEncoder {
       }
     }
     this.rowsWritten += rowCount;
-    this.zlib.push(filtered, false);
+    await this.writer.ready;
+    void this.writer.write(filtered);
   }
 
-  finish(): Blob {
+  async finish(): Promise<Blob> {
     if (this.done) throw new Error("PNG already finished");
     if (this.rowsWritten !== this.height) throw new Error(`PNG got ${this.rowsWritten} of ${this.height} rows`);
     this.done = true;
-    this.zlib.push(new Uint8Array(0), true);
+    await this.writer.close();
+    await this.reading;
 
     const ihdr = new Uint8Array(13);
     const v = new DataView(ihdr.buffer);

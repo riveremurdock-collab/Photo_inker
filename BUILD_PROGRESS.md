@@ -15,8 +15,8 @@
 | 7 | Full palette options | ✅ Done |
 | 8 | Remaining color splitting methods | ✅ Done |
 | 9 | Complete shared layer options | ✅ Done |
-| 10 | Remaining halftone types | ⏳ Next |
-| 11 | Border | — |
+| 10 | Remaining halftone types | ✅ Done |
+| 11 | Border | ⏳ Next |
 | 12 | Print simulation | — |
 | 13 | Full export options | — |
 | 14 | Performance and polish | — |
@@ -226,6 +226,30 @@
   - Knockout: yellow over 50% reduced blue under it from 0.79 to 0.05, and left black (printed after) unchanged.
   - Spread +4 / choke −4 px: black coverage 0.126 → 0.186 / 0.081.
   - Ink limit 150%: max combined coverage 262% → 151%.
+
+### Step 10
+- **New types:** AM hex grid, AM noise grid (blue/pink/green), AM phyllotaxis spiral, AM concentric rings (dots or continuous lines), and FM error diffusion (Floyd–Steinberg, Atkinson, Jarvis, Stucki). Registered in `plugins/halftone/registry.ts` next to AM square and FM blue noise.
+- **Shared lattice framework** (`plugins/halftone/lattice.ts`):
+  - Each non-square AM grid only answers "which dot center is nearest to this point?".
+  - Tone is exact for any grid and dot shape (round, square, ellipse, diamond, line). A 256-step threshold table per grid + shape is measured once by sampling 64k points, so a 30% tone inks 30% of the area.
+  - Shared per-ink dot settings: maximum dot, shape, and a dot size curve.
+- **Hex:** cell size is scaled so a hex cell has the same area (dot density) as a square cell of that size. Angles repeat every 60°; defaults are 0/30/15/45° (15° apart, the most two hex screens can differ).
+- **Noise grid:** one dot per cell of a square grid, nudged by a 64 × 64 repeating noise tile; each ink reads the tile at its own seeded offset.
+- **Spiral:**
+  - The point table is built in a worker, sized to reach the output's farthest corner, and bucketed for GPU lookup.
+  - Divergence 137.5° (the default, and anything that rounds to it) uses the true golden angle, 137.5078°. Exactly 137.5° is 55/144 of a turn, which lines points up into 144 visible spokes away from the center.
+- **Rings:** ring spacing per ink, dots along the rings with a spacing ratio, or continuous lines; the center is movable, and per-ink rotation moves dots along the rings.
+- **Error diffusion:**
+  - Needs the whole image, so it is not a shader. The coverage is read back and diffused in a worker (`workers/halftone.worker.ts`), then drawn from a bitmap texture.
+  - Preview: up to 2048 cells across. Export: full output resolution (the coverage is rendered in bands through `renderRegion`), on a separate worker so preview changes can't cancel it.
+  - Settings: kernel, dot size (never below the largest minimum dot), square/round dots, serpentine scanning, threshold noise, seed.
+- **Plugin interface additions:** `prepare`/`prepareKey` get the output size; `fromCoverage { cell, build }` for whole-image methods; `uniforms` receives the bitmap.
+- **PNG encoder fix:** fflate's streaming `Zlib` (0.8.3, the latest) wrote corrupt streams for hard-to-compress data pushed in many pieces ("invalid distance too far back"). `export/png.ts` now uses the browser's built-in `CompressionStream("deflate")`, with backpressure. fflate is still used for the zip.
+- **Measured:**
+  - Tone at fit vs smooth (5 patches, 3 inks, ΔE): noise ≤ 2.4, hex ≤ 0.8, diffusion ≤ 1.2.
+  - Spiral ≤ 5.7 and rings ≤ 5.2 with 3 inks, but ≤ 0.5 with one ink. The gap is real: inks that share a center overlap in a fixed pattern rather than at random, as the smooth mix assumes. That is how these screens would print.
+  - Full-resolution riso layers: per-patch coverage within 0.006 of smooth for hex, noise, spiral and rings.
+  - Error diffusion re-diffuses in ~1.5 s (preview, SwiftShader); the UI stays responsive meanwhile.
 
 ## Open questions
 

@@ -14,6 +14,9 @@
     "src/engine/spectral/solver.ts",
     "src/workers/inkMatchTypes.ts",
     "src/workers/blueNoiseTypes.ts",
-    "src/engine/halftone/voidAndCluster.ts"
+    "src/engine/halftone/voidAndCluster.ts",
+    "src/workers/halftoneTypes.ts",
+    "src/engine/halftone/spiral.ts",
+    "src/engine/halftone/errorDiffusion.ts"
   ]
 }

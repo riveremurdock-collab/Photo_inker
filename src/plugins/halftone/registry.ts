@@ -1,14 +1,27 @@
 // All halftone types. "None" (printer halftone) is built in: smooth coverage,
 // no method code. To add a type: write its file (section + method) and add it
-// to both lists below.
+// to the lists below.
 
+import { amHex, amHexSection } from "./amHex";
+import { amNoise, amNoiseSection } from "./amNoise";
+import { amRings, amRingsSection } from "./amRings";
+import { amSpiral, amSpiralSection } from "./amSpiral";
 import { amSquare, amSquareSection } from "./amSquare";
 import { fmBlueNoise, fmBlueNoiseSection } from "./fmBlueNoise";
+import { fmDiffusion, fmDiffusionSection } from "./fmDiffusion";
 import type { HalftoneMethod } from "./types";
 
-const METHODS = [amSquare, fmBlueNoise];
+const METHODS = [amSquare, amNoise, amHex, amSpiral, amRings, fmBlueNoise, fmDiffusion];
 
-export const HALFTONE_SECTIONS = [amSquareSection, fmBlueNoiseSection] as const;
+export const HALFTONE_SECTIONS = [
+  amSquareSection,
+  amNoiseSection,
+  amHexSection,
+  amSpiralSection,
+  amRingsSection,
+  fmBlueNoiseSection,
+  fmDiffusionSection,
+] as const;
 
 export const HALFTONE_TYPE_OPTIONS = [
   { value: "none", label: "None (printer halftone)" },
