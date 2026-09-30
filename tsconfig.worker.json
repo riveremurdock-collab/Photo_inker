@@ -18,6 +18,7 @@
     "src/workers/halftoneTypes.ts",
     "src/engine/halftone/spiral.ts",
     "src/engine/halftone/errorDiffusion.ts",
-    "src/engine/halftone/noiseField.ts"
+    "src/engine/halftone/noiseField.ts",
+    "src/engine/halftone/stipple.ts"
   ]
 }

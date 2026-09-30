@@ -68,6 +68,8 @@ export interface HalftoneMethod<Sec extends SectionSchema = SectionSchema, P = u
   /** Settings section, with parent "halftone". */
   section: Sec;
   glsl: string;
+  /** How far (output px) a dot can reach from its center, if more than the default (1.5 × cell or dot size). */
+  reach?(values: SectionValues<Sec>, ctx: HalftoneContext): number;
   /** Optional heavy CPU work (e.g. a threshold map), cached by the key it returns. */
   prepareKey?(values: SectionValues<Sec>, info: OutputInfo): string;
   prepare?(values: SectionValues<Sec>, info: OutputInfo): Promise<P>;

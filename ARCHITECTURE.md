@@ -123,6 +123,7 @@ interface HalftoneMethod<Sec extends SectionSchema, P> {
 - **Halftone types (Step 10).**
   - Non-square AM grids (hex, noise, spiral, rings) share `plugins/halftone/lattice.ts`. A grid only defines `latToLattice`, `latFromLattice` and `latNearest` in GLSL (plus the same nearest-center search in TS). Exact tone comes from a threshold table measured by sampling the grid (`measureThresholds`), cached per grid + dot shape.
   - Whole-image methods (`fromCoverage`) are fed by the pipeline: it reads the coverage back at the method's cell size, the method builds a bitmap in a worker, and its GLSL draws from the bitmap texture. Export rebuilds the bitmap at full output resolution. `halftoneWorker(purpose)` keeps preview and export on separate workers.
+  - **FM: stipple** (`fmStipple.ts` + `engine/halftone/stipple.ts`) has no grid: a ranked best-candidate point set in GPU buckets, per-dot shapes from hashed parameters, and a tone table measured on the CPU with the same dot formula (the TS and GLSL versions must be kept in step).
 - **Minimum dot size and drop-out/round-up** are shared halftone settings, applied by the halftone stage around the plugin rather than by each plugin.
 
 ## 5. Pipeline

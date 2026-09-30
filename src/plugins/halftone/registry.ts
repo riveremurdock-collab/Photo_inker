@@ -9,9 +9,10 @@ import { amSpiral, amSpiralSection } from "./amSpiral";
 import { amSquare, amSquareSection } from "./amSquare";
 import { fmBlueNoise, fmBlueNoiseSection } from "./fmBlueNoise";
 import { fmDiffusion, fmDiffusionSection } from "./fmDiffusion";
+import { fmStipple, fmStippleSection } from "./fmStipple";
 import type { HalftoneMethod } from "./types";
 
-const METHODS = [amSquare, amNoise, amHex, amSpiral, amRings, fmBlueNoise, fmDiffusion];
+const METHODS = [amSquare, amNoise, amHex, amSpiral, amRings, fmBlueNoise, fmStipple, fmDiffusion];
 
 export const HALFTONE_SECTIONS = [
   amSquareSection,
@@ -20,6 +21,7 @@ export const HALFTONE_SECTIONS = [
   amSpiralSection,
   amRingsSection,
   fmBlueNoiseSection,
+  fmStippleSection,
   fmDiffusionSection,
 ] as const;
 

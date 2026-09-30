@@ -246,6 +246,12 @@
   - Needs the whole image, so it is not a shader. The coverage is read back and diffused in a worker (`workers/halftone.worker.ts`), then drawn from a bitmap texture.
   - Preview: up to 2048 cells across. Export: full output resolution (the coverage is rendered in bands through `renderRegion`), on a separate worker so preview changes can't cancel it.
   - Settings: kernel, dot size (never below the largest minimum dot), square/round dots, serpentine scanning, threshold noise, seed.
+- **FM: stipple** (added at the user's request; not in the outline): hand-stippled dots with no grid.
+  - Placement: ~524k best-candidate points on a 512 × 512 dot-unit torus, ranked in placement order so every prefix is evenly spread; a dot prints when its rank is below the rank threshold for the tone at its center. Built once per session in the halftone worker (~3.7 s, background). Per-ink seeded offsets, and each repeat of the tile hashes its dots differently, so repeats aren't visible.
+  - Every dot is drawn from a formula driven by hashes of its id (no sprite library): size (variation), size following tone, angle, stretch, polygon sides (Chip), low-harmonic wobble, high-harmonic edge roughness, value-noise grain; bleed merges neighbors with a smooth minimum of signed distances.
+  - Settings: dot size (per ink), shape (Round / Chip / Dash), size variation, size follows tone, placement irregularity, shape wobble, edge roughness, stretch, direction, direction variation, ink bleed, ink grain, seed.
+  - Tone: the same dot formula runs on the CPU in the worker to measure, for 33 tones, the rank threshold that inks exactly that share of paper (lazy evaluation in rank order; 0.13 s at defaults, ~1.1 s at extreme settings). Measured ΔE at fit ≤ 2.3; export coverage within ~2.5% of smooth per patch.
+  - Methods may now declare `reach()` (export tile margin) when dots reach farther than 1.5 × their size.
 - **Plugin interface additions:** `prepare`/`prepareKey` get the output size; `fromCoverage { cell, build }` for whole-image methods; `uniforms` receives the bitmap.
 - **PNG encoder fix:** fflate's streaming `Zlib` (0.8.3, the latest) wrote corrupt streams for hard-to-compress data pushed in many pieces ("invalid distance too far back"). `export/png.ts` now uses the browser's built-in `CompressionStream("deflate")`, with backpressure. fflate is still used for the zip.
 - **Measured:**

@@ -698,7 +698,7 @@ export class Pipeline {
       this.halftoned = true;
       this.clearDetail();
       const methodUniforms = method.uniforms(values, ctx, prepared as never, this.bitmap?.value);
-      this.halftoneState = { method, methodUniforms, reach: halftoneReach(values), values, ctx, prepared };
+      this.halftoneState = { method, methodUniforms, reach: method.reach ? method.reach(values, ctx) : halftoneReach(values), values, ctx, prepared };
       this.compositor.set({
         method,
         methodUniforms,
