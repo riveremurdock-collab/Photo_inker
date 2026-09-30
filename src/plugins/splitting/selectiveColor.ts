@@ -63,6 +63,7 @@ export const selectiveColorSection = defineSection({
       key: "baseInk",
       label: "Base ink (everything else)",
       default: "auto",
+      inkChoice: true,
       options: [
         { value: "none", label: "None (paper)" },
         { value: "auto", label: "Auto (darkest ink)" },

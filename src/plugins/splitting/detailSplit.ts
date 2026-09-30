@@ -62,6 +62,7 @@ export const detailSplitSection = defineSection({
       key: "detailInk",
       label: "Detail ink",
       default: "auto",
+      inkChoice: true,
       options: [
         { value: "auto", label: "Auto (darkest ink)" },
         { value: "0", label: "Ink 1" },

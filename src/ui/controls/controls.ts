@@ -23,6 +23,8 @@ export interface Control {
   element: HTMLElement;
   /** Sets the shown value without firing change events. */
   update(value: unknown): void;
+  /** Dropdowns only: replaces the options (e.g. when the palette's inks change). */
+  setOptions?(options: readonly { value: string; label: string }[]): void;
 }
 
 let idCounter = 0;
@@ -134,16 +136,23 @@ function selectControl(def: SelectSetting, value: string, onChange: ChangeHandle
   const { row: el, body } = row(def, id, label);
   const select = document.createElement("select");
   select.id = id;
-  for (const opt of def.options) {
-    const o = document.createElement("option");
-    o.value = opt.value;
-    o.textContent = opt.label;
-    select.append(o);
-  }
+  const setOptions = (options: readonly { value: string; label: string }[]) => {
+    const current = select.value;
+    select.replaceChildren(
+      ...options.map((opt) => {
+        const o = document.createElement("option");
+        o.value = opt.value;
+        o.textContent = opt.label;
+        return o;
+      }),
+    );
+    select.value = current;
+  };
+  setOptions(def.options);
   select.value = value;
   select.addEventListener("change", () => onChange(select.value, true));
   body.append(select);
-  return { element: el, update: (v) => (select.value = String(v)) };
+  return { element: el, update: (v) => (select.value = String(v)), setOptions };
 }
 
 function toggleControl(def: ToggleSetting, value: boolean, onChange: ChangeHandler, label?: string): Control {

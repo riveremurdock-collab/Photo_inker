@@ -120,11 +120,39 @@ export class Panel {
     const control = createControl(def, this.store.getValue(sectionId, def.key), (value, commit) =>
       this.store.setValue(sectionId, def.key, value, { commit }),
     );
+    if (def.kind === "select" && def.inkChoice) return this.inkChoiceControl(sectionId, def, control);
     return {
       sectionId,
       def,
       element: control.element,
       update: () => control.update(this.store.getValue(sectionId, def.key)),
+    };
+  }
+
+  /**
+   * A dropdown listing the palette's current inks ("Ink 1 · #0078BF"). A stored
+   * slot beyond the ink count shows the ink actually used (the last one).
+   */
+  private inkChoiceControl(sectionId: string, def: SettingDef & { kind: "select" }, control: Control): BoundControl {
+    const fixed = def.options.filter((o) => !/^\d+$/.test(o.value));
+    let signature = "";
+    return {
+      sectionId,
+      def,
+      element: control.element,
+      update: (settings) => {
+        const { inkCount, inkColor } = settings.palette;
+        const next = `${inkCount}|${inkColor.slice(0, inkCount).join()}`;
+        if (next !== signature) {
+          signature = next;
+          control.setOptions?.([
+            ...fixed,
+            ...Array.from({ length: inkCount }, (_, i) => ({ value: String(i), label: `Ink ${i + 1} · ${(inkColor[i] ?? "").toUpperCase()}` })),
+          ]);
+        }
+        const value = String(this.store.getValue(sectionId, def.key));
+        control.update(/^\d+$/.test(value) && Number(value) >= inkCount ? String(inkCount - 1) : value);
+      },
     };
   }
 

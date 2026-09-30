@@ -355,6 +355,7 @@ export const borderSection = defineSection({
       key: "frameInk",
       label: "Border ink",
       default: "0",
+      inkChoice: true,
       options: [
         { value: "0", label: "Ink 1" },
         { value: "1", label: "Ink 2" },

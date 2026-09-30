@@ -48,6 +48,12 @@ export interface SelectSetting extends SettingBase<string> {
   readonly options: readonly { readonly value: string; readonly label: string }[];
   /** Segmented buttons suit 2–4 short options; dropdown is the default. */
   readonly display?: "dropdown" | "segmented";
+  /**
+   * The options whose value is an ink slot ("0"–"3") are replaced by the
+   * palette's current inks, labelled with their hex codes (dropdown only).
+   * Other options (e.g. "auto") stay first.
+   */
+  readonly inkChoice?: boolean;
 }
 
 export interface ToggleSetting extends SettingBase<boolean> {
