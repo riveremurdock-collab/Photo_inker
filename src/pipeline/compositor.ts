@@ -9,6 +9,7 @@
 // aliased version), and zoomed-in views show crisp, anti-aliased dots.
 
 import { GLSL_FRAME, GLSL_ROUNDED_RECT } from "../app/border";
+import { glslPrintSim } from "../app/printSim";
 import type { Gpu, Target, UniformValue } from "../engine/gl/gpu";
 import { GLSL_INKS } from "../engine/gl/inkShader";
 import { GLSL_LINEAR_TO_SRGB, GLSL_SRGB_TO_LINEAR } from "../engine/gl/program";
@@ -20,7 +21,7 @@ const MAX_SAMPLES = 8;
 /** Samples per axis while zooming/panning. */
 const FAST_SAMPLES = 3;
 
-function fragment(methodGlsl: string): string {
+function fragment(methodGlsl: string, simEffects: boolean): string {
   return /* glsl */ `#version 300 es
 precision highp float;
 precision highp int;
@@ -41,11 +42,14 @@ ${GLSL_LINEAR_TO_SRGB}
 ${GLSL_ROUNDED_RECT}
 ${GLSL_FRAME}
 
-// Coverage of an ink at output position p (with the image's transparency). Halftone code may call it.
-float htCoverage(int ink, vec2 p) {
+float htCoverageRaw(int ink, vec2 p) {
   vec2 uv = clamp(p / uOutScale / uImageSize, vec2(0.0), vec2(1.0));
   return textureLod(uCoverage, uv, 0.0)[ink] * textureLod(uImage, uv, 0.0).a;
 }
+${glslPrintSim(simEffects)}
+// Coverage of an ink at output position p (with the image's transparency, and
+// dot gain / compensation). Halftone code may call it.
+float htCoverage(int ink, vec2 p) { return simTone(ink, htCoverageRaw(ink, p)); }
 
 ${methodGlsl}
 
@@ -60,6 +64,9 @@ void main() {
   vec2 jitter = vec2(hash(p), hash(p + 17.31));
   vec3 sum = vec3(0.0);
   float count = 0.0;
+  // Low-ink patches vary slowly: one lookup per ink per screen pixel.
+  float lost[4];
+  for (int ink = 0; ink < 4; ink++) lost[ink] = simPatchLost(ink, simWarp(ink, center * uOutScale, false));
   for (int j = 0; j < ${MAX_SAMPLES}; j++) {
     if (j >= uSamples) break;
     for (int i = 0; i < ${MAX_SAMPLES}; i++) {
@@ -74,19 +81,19 @@ void main() {
         sum += uBackground;
         continue;
       }
-      // Solid ink / paper border: drawn over everything, never halftoned.
-      if (frameCovers(ip)) {
-        int m = frameMask();
-        sum += uTable[m != 0 && uVisible[uFrameInk] > 0.5 ? m : 0];
-        continue;
-      }
       vec2 op = ip * uOutScale;  // output px
       int mask = 0;
       for (int ink = 0; ink < 4; ink++) {
         if (ink >= uInkCount) break;
         if (uVisible[ink] < 0.5) continue;
-        float c = htCoverage(ink, htSamplePoint(ink, op));
-        if (htInk(ink, op, c) > 0.5) mask |= (1 << ink);
+        // Each ink is read at its own (misregistered) position; its border moves with it.
+        vec2 q = simWarp(ink, op, true);
+        vec2 iq = q / uOutScale;
+        bool on;
+        if (frameCovers(iq)) on = frameMask() == (1 << ink);
+        else if (any(lessThan(iq, vec2(0.0))) || any(greaterThanEqual(iq, uImageSize))) on = false;
+        else on = htInk(ink, q, htCoverage(ink, htSamplePoint(ink, q))) > 0.5;
+        if (simApply(ink, q, lost[ink], on)) mask |= (1 << ink);
       }
       sum += uTable[mask];
     }
@@ -114,11 +121,17 @@ export class Compositor implements ProceduralSource {
   private state: CompositorState | null = null;
   private shaders = new Map<string, string>();
   private frame: Record<string, UniformValue> = {};
+  private sim: Record<string, UniformValue> = {};
 
   constructor(private gpu: Gpu) {}
 
   set(state: CompositorState): void {
     this.state = state;
+  }
+
+  /** Print simulation uniforms (see app/printSim.ts). */
+  setSim(sim: Record<string, UniformValue>): void {
+    this.sim = sim;
   }
 
   /** Solid ink / paper border uniforms (see app/border.ts). */
@@ -135,14 +148,17 @@ export class Compositor implements ProceduralSource {
   draw(view: ViewTransform, canvasWidth: number, canvasHeight: number, quality: "fast" | "full"): void {
     const s = this.state;
     if (!s) return;
-    let shader = this.shaders.get(s.method.id);
-    if (!shader) this.shaders.set(s.method.id, (shader = fragment(s.method.glsl)));
+    const simEffects = this.sim.uSimOn === 1;
+    const key = `${s.method.id}|${simEffects}`;
+    let shader = this.shaders.get(key);
+    if (!shader) this.shaders.set(key, (shader = fragment(s.method.glsl, simEffects)));
     this.gpu.draw(shader, null, canvasWidth, canvasHeight, {
       ...s.inkUniforms,
       ...s.methodUniforms,
       uFrameCanvas: [0, 0, s.imageWidth, s.imageHeight],
       uFrameMode: 0,
       ...this.frame,
+      ...this.sim,
       uCoverage: { texture: s.coverage.texture },
       uImage: { texture: s.image.texture },
       uViewSize: [canvasWidth, canvasHeight],

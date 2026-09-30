@@ -12,11 +12,7 @@ import type { SectionSchema, SettingDef } from "../schema/types";
 import { createControl, type Control } from "./controls/controls";
 
 /** Shown in sections that have no settings yet. */
-const COMING_IN: Partial<Record<SectionId, string>> = {
-  halftone: "Halftone options arrive in Step 5.",
-  border: "Border options arrive in Step 11.",
-  printSim: "Print simulation arrives in Step 12.",
-};
+const COMING_IN: Partial<Record<SectionId, string>> = {};
 
 interface BoundControl {
   sectionId: string;

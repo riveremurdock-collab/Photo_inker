@@ -19,7 +19,7 @@ import type { Target } from "../engine/gl/gpu";
 import { emptyRegionTargets, type ExportState, type Pipeline } from "../pipeline/pipeline";
 import type { ProjectSettings } from "../schema/sections";
 import { PngEncoder } from "./png";
-import { halftoneExportShader, SMOOTH_EXPORT } from "./shaders";
+import { halftoneExportShader, smoothExportShader } from "./shaders";
 
 const TILE = 2048;
 /** Largest JPG the browser's encoder is asked to make (it needs the whole image as a canvas). */
@@ -109,8 +109,11 @@ async function renderTiles(
   const texelScale = Math.min(state.sourceScale, scale);
   const sigmaImage = (state.smoothing * Math.max(state.imageWidth, state.imageHeight)) / 1000;
   const margin =
-    (state.halftone ? state.halftone.reach / scale : 0) + (state.smoothing > 0 ? sigmaImage * 2.5 : 0) + state.splitReach + 2;
-  const shader = state.halftone ? halftoneExportShader(state.halftone.method.glsl) : SMOOTH_EXPORT;
+    (state.halftone ? state.halftone.reach / scale : 0) + (state.smoothing > 0 ? sigmaImage * 2.5 : 0) + state.splitReach + state.simReach + 2;
+  // Digital: print simulation baked in. Riso layers: only dot gain compensation.
+  const sim = state.sim(plan.kind === "riso" ? "riso" : "digital");
+  const simEffects = sim.uSimOn === 1;
+  const shader = state.halftone ? halftoneExportShader(state.halftone.method.glsl, simEffects) : smoothExportShader(simEffects);
 
   const targets = emptyRegionTargets();
   let output: Target | null = null;
@@ -143,6 +146,7 @@ async function renderTiles(
           ...state.inkUniforms,
           ...(state.halftone?.methodUniforms ?? {}),
           ...frameUniforms(state.border),
+          ...sim,
           uCoverage: { texture: r.layered.texture },
           uImage: { texture: r.source.texture },
           ...(r.mixed ? { uMixed: { texture: r.mixed.texture } } : {}),

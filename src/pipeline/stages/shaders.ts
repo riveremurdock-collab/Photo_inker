@@ -2,6 +2,7 @@
 // the image top; passes compute uv from gl_FragCoord, so no flipping.
 
 import { GLSL_ROUNDED_RECT } from "../../app/border";
+import { glslPrintSim } from "../../app/printSim";
 import { GLSL_INKS } from "../../engine/gl/inkShader";
 import { GLSL_LIGHTNESS, GLSL_LINEAR_TO_SRGB, GLSL_SRGB_TO_LINEAR } from "../../engine/gl/program";
 
@@ -184,16 +185,41 @@ void main() {
 `;
 
 /** Ink coverage → color with the spectral overlap table. Output is linear; the sRGB target encodes it. */
-export const MIX = /* glsl */ `${HEADER}
+/** Mix pass; simEffects picks the print simulation variant (see app/printSim.ts). */
+export const mixShader = (simEffects: boolean) => /* glsl */ `${HEADER}
 uniform sampler2D uCoverage;
 uniform sampler2D uImage;   // for transparency: transparent pixels get no ink
 uniform vec4 uVisible;      // solo/mute: 1 = shown
+uniform vec4 uRegionPx;     // image px this pass covers: x, y, width, height
 ${GLSL_SRGB_TO_LINEAR}
 ${GLSL_INKS}
+${glslPrintSim(simEffects)}
 void main() {
   vec2 uv = gl_FragCoord.xy / uSize;
-  vec4 cov = texture(uCoverage, uv) * uVisible * texture(uImage, uv).a;
-  outColor = vec4(gamutCompress(mixInks(cov)), 1.0);
+  vec4 cov;
+  if (${simEffects ? "uSimOn == 0" : "true"}) {
+    cov = texture(uCoverage, uv) * texture(uImage, uv).a;
+    for (int ink = 0; ink < 4; ink++) cov[ink] = simTone(ink, cov[ink]); // dot gain compensation
+  } else {
+    // Print simulation on smooth coverage: each ink read at its own misregistered
+    // position, then dot gain, low-ink patches (as lost coverage) and specks.
+    vec2 op = (uRegionPx.xy + uv * uRegionPx.zw) * uSimOutScale;
+    for (int ink = 0; ink < 4; ink++) {
+      vec2 q = simWarp(ink, op, false);
+      vec2 iq = q / uSimOutScale;
+      vec2 quv = (iq - uRegionPx.xy) / uRegionPx.zw;
+      float c = 0.0;
+      if (all(greaterThanEqual(iq, vec2(0.0))) && all(lessThan(iq, uSimImageSize))) {
+        c = simTone(ink, texture(uCoverage, quv)[ink] * texture(uImage, quv).a);
+      }
+      c *= 1.0 - simPatchLost(ink, q);
+      int sp = simSpeck(ink, q);
+      if (sp == 1) c = 1.0;
+      else if (sp == -1) c = 0.0;
+      cov[ink] = c;
+    }
+  }
+  outColor = vec4(gamutCompress(mixInks(cov * uVisible)), 1.0);
 }
 `;
 

@@ -5,12 +5,16 @@
 //   pixel, the same as the preview at 100%.
 // Mode 1 (Riso layers): one ink per channel, 255 = paper, 0 = ink. Halftoned
 //   tiles sample each pixel once, so layers are pure black and white.
+//
+// Print simulation uniforms come from app/printSim.ts: effects for Digital,
+// only dot gain compensation for riso layers.
 
 import { GLSL_FRAME, GLSL_ROUNDED_RECT } from "../app/border";
+import { glslPrintSim } from "../app/printSim";
 import { GLSL_INKS } from "../engine/gl/inkShader";
 import { GLSL_LINEAR_TO_SRGB, GLSL_SRGB_TO_LINEAR } from "../engine/gl/program";
 
-const HEADER = /* glsl */ `#version 300 es
+const header = (simEffects: boolean) => /* glsl */ `#version 300 es
 precision highp float;
 precision highp int;
 uniform sampler2D uCoverage;  // region coverage (after layer options)
@@ -30,26 +34,34 @@ vec2 regionUv(vec2 outputPx) {
   return clamp((outputPx / uOutScale - uRegion.xy) / uRegion.zw, vec2(0.0), vec2(1.0));
 }
 
-float htCoverage(int ink, vec2 p) {
+float htCoverageRaw(int ink, vec2 p) {
   vec2 uv = regionUv(p);
   return textureLod(uCoverage, uv, 0.0)[ink] * textureLod(uImage, uv, 0.0).a;
 }
+${glslPrintSim(simEffects)}
+float htCoverage(int ink, vec2 p) { return simTone(ink, htCoverageRaw(ink, p)); }
 `;
 
 /** Halftoned export: the halftone method's GLSL is inserted. */
-export function halftoneExportShader(methodGlsl: string): string {
-  return /* glsl */ `${HEADER}
+export function halftoneExportShader(methodGlsl: string, simEffects: boolean): string {
+  return /* glsl */ `${header(simEffects)}
 ${methodGlsl}
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 
 int inkMask(vec2 p) {
-  // Solid ink / paper border: over everything, never halftoned.
-  if (frameCovers(p / uOutScale)) return frameMask();
   int mask = 0;
   for (int ink = 0; ink < 4; ink++) {
     if (ink >= uInkCount) break;
-    if (htInk(ink, p, htCoverage(ink, htSamplePoint(ink, p))) > 0.5) mask |= (1 << ink);
+    // Each ink at its own (misregistered) position; the border moves with its ink.
+    vec2 q = simWarp(ink, p, true);
+    vec2 iq = q / uOutScale;
+    bool on;
+    // Solid ink / paper border: over everything, never halftoned.
+    if (frameCovers(iq)) on = frameMask() == (1 << ink);
+    else if (uSimOn == 1 && (any(lessThan(iq, vec2(0.0))) || any(greaterThanEqual(iq, uSimImageSize)))) on = false;
+    else on = htInk(ink, q, htCoverage(ink, htSamplePoint(ink, q))) > 0.5;
+    if (simApply(ink, q, simPatchLost(ink, q), on)) mask |= (1 << ink);
   }
   return mask;
 }
@@ -78,7 +90,7 @@ void main() {
 }
 
 /** Halftone None: smooth coverage (layers) or the mixed color (digital). */
-export const SMOOTH_EXPORT = /* glsl */ `${HEADER}
+export const smoothExportShader = (simEffects: boolean) => /* glsl */ `${header(simEffects)}
 uniform sampler2D uMixed;     // region mixed color (sRGB texture: samples as linear)
 void main() {
   vec2 p = uTileOrigin + gl_FragCoord.xy;
@@ -97,7 +109,7 @@ void main() {
   if (uMode == 1) {
     vec4 cov = textureLod(uCoverage, uv, 0.0) * textureLod(uImage, uv, 0.0).a;
     vec4 gray = vec4(1.0);
-    for (int ink = 0; ink < 4; ink++) if (ink < uInkCount) gray[ink] = 1.0 - cov[ink];
+    for (int ink = 0; ink < 4; ink++) if (ink < uInkCount) gray[ink] = 1.0 - simTone(ink, cov[ink]); // compensation
     outColor = gray;
     return;
   }

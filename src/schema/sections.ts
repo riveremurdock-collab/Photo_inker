@@ -4,6 +4,7 @@
 import { SCHEMES } from "../app/colorSchemes";
 import { HALFTONE_SECTIONS, HALFTONE_TYPE_OPTIONS } from "../plugins/halftone/registry";
 import { SPLIT_METHOD_OPTIONS, SPLIT_SECTIONS } from "../plugins/splitting/registry";
+import { PRINT_SIM_SECTIONS } from "./printSimSections";
 import { defineSection, type SectionValues } from "./types";
 
 export const uploadSection = defineSection({
@@ -380,13 +381,6 @@ export const borderSection = defineSection({
   ],
 });
 
-export const printSimSection = defineSection({
-  id: "printSim",
-  title: "Print Simulation",
-  stage: "printSim",
-  settings: [],
-});
-
 export const exportSection = defineSection({
   id: "export",
   title: "Export",
@@ -458,6 +452,15 @@ export const exportSection = defineSection({
       modes: ["print"],
       help: "Riso machines print at 600 DPI.",
     },
+    {
+      kind: "toggle",
+      key: "gainCompensation",
+      label: "Dot gain compensation",
+      default: false,
+      modes: ["print"],
+      stage: "printSim",
+      help: "Shrinks dots in the riso layers so they print at the intended size after the ink spreads. Uses the Dot gain settings in Print Simulation.",
+    },
   ],
 });
 
@@ -471,7 +474,7 @@ export const SECTIONS = [
   halftoneSection,
   ...HALFTONE_SECTIONS,
   borderSection,
-  printSimSection,
+  ...PRINT_SIM_SECTIONS,
   exportSection,
 ] as const;
 

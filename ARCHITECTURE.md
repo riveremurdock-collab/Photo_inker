@@ -209,6 +209,11 @@ This follows the outline's Rendering Engine section.
 - The **fade** is part of the adjust pass (`uRegionPx` tells each pass which image px it covers).
 - The **solid ink / paper border** is a "border" stage after mix that only computes geometry and color; the compositor, the smooth view (`ViewRenderer`) and the export shaders draw it. Positions are image px; a positive border extends the canvas to [−margin, W + margin]. Export plans carry the canvas size plus the image's offset in it, and tiles pass image-anchored output px to the halftone code.
 
+## 6c. Print simulation (Step 12)
+
+- `app/printSim.ts`: `simUniforms(settings, purpose)` (purpose preview / digital / riso decides which effects and whether compensation apply) and `GLSL_PRINTSIM` (simWarp, simTone, simPatchLost, simSpeck, simApply). Every consumer defines `htCoverageRaw` and wraps it as `htCoverage = simTone(raw)`, so dot gain reaches every halftone type without changing them.
+- The "printSim" stage builds the blurred coverage map and the preview uniforms; `ExportState.sim(purpose)` gives the export its own.
+
 ## 6b. Export (Step 6)
 
 - `export/exporter.ts` renders the output pixel grid in 2048 px tiles.

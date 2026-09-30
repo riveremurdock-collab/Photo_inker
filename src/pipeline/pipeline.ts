@@ -1,8 +1,8 @@
 // The processing pipeline for the preview:
 //
-//   upload → fade + adjust → split → layerOptions → mix → border ─→ display (halftone None)
-//                                                     └→ halftone compositor → display (AM / FM)
-//                                   overlapTable ┘
+//   upload → fade + adjust → split → layerOptions → printSim → mix → border ─→ display (halftone None)
+//                                                                └→ halftone compositor → display (AM / FM)
+//                                              overlapTable ┘
 //
 // Every stage keeps its output and a key made of its own settings and the
 // versions of the stages it reads. A run walks the stages in order and reruns
@@ -18,10 +18,13 @@
 // The fade border runs inside the adjust pass (before everything else). The
 // solid ink / paper border is drawn after halftoning, by the display and the
 // export, from the geometry the "border" stage computes. Print simulation
-// slots in later.
+// (app/printSim.ts) is a set of uniforms the mix pass, the compositor and the
+// export apply to each ink before mixing; its stage also builds the blurred
+// coverage map that low-ink patches and specks use.
 
 import { borderGeometry, fadeLut, FADE_LUT_SIZE, frameUniforms, type BorderGeometry } from "../app/border";
 import { outputScale } from "../app/output";
+import { simNeedsDensity, simReach, simUniforms, type SimPurpose } from "../app/printSim";
 import type { SourceStore } from "../app/source";
 import type { SettingsStore } from "../app/store";
 import { Gpu, type Target, type UniformValue } from "../engine/gl/gpu";
@@ -39,7 +42,7 @@ import { sampleCurve, type CurvePoint } from "../util/curve";
 import { SupersededError } from "../workers/workerClient";
 import { Compositor } from "./compositor";
 import { MAX_INKS } from "./coverage";
-import { ADJUST, ANALYSIS, COPY, LAYERS, LAYERS_TRAP, LIGHTNESS, MIX, SMOOTH } from "./stages/shaders";
+import { ADJUST, ANALYSIS, COPY, LAYERS, LAYERS_TRAP, LIGHTNESS, mixShader, SMOOTH } from "./stages/shaders";
 
 /** Longest texture edge used for the original image on the GPU. */
 const SOURCE_TEXTURE_CAP = 8192;
@@ -152,6 +155,11 @@ export class Pipeline {
   /** Fade border uniforms for the adjust pass (also used by region renders). */
   private fade: { key: string; uniforms: Record<string, UniformValue> } = { key: "off", uniforms: { uFade: 0 } };
   private border: BorderGeometry | null = null;
+  /** Print simulation uniforms for the preview (see app/printSim.ts). */
+  private sim: Record<string, UniformValue> = { uSimOn: 0 };
+  private simSetup: { settings: ProjectSettings; W: number; H: number; scale: number; density: WebGLTexture } | null = null;
+  private densityTargets: Target[] = [];
+  private emptyDensity: WebGLTexture | null = null;
   private inputs: PassInputs | null = null;
   private layerTone: { texture: WebGLTexture; key: string } | null = null;
 
@@ -232,6 +240,7 @@ export class Pipeline {
       this.runHistogram(settings) &&
       this.runSplit(settings) &&
       this.runLayers() &&
+      this.runPrintSim(settings, image.width, image.height) &&
       this.runMix(settings) &&
       this.runBorder(settings, image.width, image.height) &&
       this.runHalftone(settings, image.width, image.height);
@@ -646,15 +655,19 @@ export class Pipeline {
   private runMix(settings: ProjectSettings): boolean {
     const visible = this.visible(settings);
     const tableKey = JSON.stringify(inkSetupFrom(settings));
-    return this.stage("mix", `${tableKey}|${visible}|${this.version("layerOptions")}`, () => {
-      this.mixPass(this.inputs!.inkUniforms, visible, this.main.layered!, this.working!, this.main);
+    const image = this.host.source.get()!;
+    return this.stage("mix", `${tableKey}|${visible}|${this.version("layerOptions")}|${this.version("printSim")}`, () => {
+      this.mixPass(this.inputs!.inkUniforms, visible, this.main.layered!, this.working!, this.main, [0, 0, image.width, image.height]);
     });
   }
 
-  private mixPass(inkUniforms: Record<string, UniformValue>, visible: number[], cov: Target, image: Target, t: PassTargets): Target {
+  /** regionPx: the image px area cov covers (for the print simulation). */
+  private mixPass(inkUniforms: Record<string, UniformValue>, visible: number[], cov: Target, image: Target, t: PassTargets, regionPx: number[]): Target {
     t.mixed = this.gpu.ensureTarget(t.mixed, cov.width, cov.height, "image", { mipmaps: true });
-    this.gpu.pass(MIX, t.mixed, {
+    this.gpu.pass(mixShader(this.sim.uSimOn === 1), t.mixed, {
       ...inkUniforms,
+      ...this.sim,
+      uRegionPx: regionPx,
       uCoverage: { texture: cov.texture },
       uImage: { texture: image.texture },
       uVisible: visible,
@@ -662,6 +675,68 @@ export class Pipeline {
     });
     this.gpu.generateMipmaps(t.mixed);
     return t.mixed;
+  }
+
+  // ---- print simulation: uniforms for the mix pass and compositor, plus the coverage map ----
+
+  private runPrintSim(settings: ProjectSettings, W: number, H: number): boolean {
+    const scale = outputScale(settings, W);
+    const needsDensity = simNeedsDensity(settings);
+    const key = JSON.stringify([
+      settings.printSim,
+      settings.simMisreg,
+      settings.simLowInk,
+      settings.simSpecks,
+      settings.simGain,
+      settings.export.gainCompensation,
+      settings.upload.mode,
+      scale,
+      W,
+      H,
+      needsDensity ? this.version("layerOptions") : 0,
+    ]);
+    return this.stage("printSim", key, () => {
+      const density = needsDensity ? this.buildDensity(this.main.layered!) : this.noDensity();
+      this.simSetup = { settings, W, H, scale, density };
+      this.sim = simUniforms(settings, "preview", W, H, scale, density);
+      this.compositor.setSim(this.sim);
+      this.host.preview.requestRender();
+    });
+  }
+
+  /** Blurred coverage (area-averaged down to about 128 px) for low-ink patches and specks. */
+  private buildDensity(src: Target): WebGLTexture {
+    let cur = src;
+    let i = 0;
+    while (Math.max(cur.width, cur.height) > 128) {
+      const w = Math.max(1, Math.ceil(cur.width / 2));
+      const h = Math.max(1, Math.ceil(cur.height / 2));
+      const next = this.gpu.ensureTarget(this.densityTargets[i] ?? null, w, h, "coverage");
+      this.densityTargets[i] = next;
+      this.gpu.pass(COPY, next, { uImage: { texture: cur.texture }, uRatio: [cur.width / w, cur.height / h], uRegion: [0, 0, 1, 1], uSize: [w, h] });
+      cur = next;
+      i++;
+    }
+    return cur.texture;
+  }
+
+  private noDensity(): WebGLTexture {
+    if (!this.emptyDensity) {
+      const gl = this.gpu.gl;
+      this.emptyDensity = gl.createTexture()!;
+      gl.bindTexture(gl.TEXTURE_2D, this.emptyDensity);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    }
+    return this.emptyDensity;
+  }
+
+  /** Extra margin (image px) the print simulation needs around a region. */
+  private simReach(): number {
+    const s = this.simSetup;
+    return s ? simReach(s.settings, s.W, s.H, s.scale) : 0;
   }
 
   // ---- border: solid ink / paper frame, drawn by the display and the export ----
@@ -876,7 +951,7 @@ export class Pipeline {
     const t0 = performance.now();
     const a = inputs.adjust;
     const sigmaImage = (a.smoothing * Math.max(W, H)) / 1000;
-    const margin = (a.smoothing > 0 ? Math.ceil(sigmaImage * 2.5) : 0) + Math.ceil(this.splitReach()) + 2;
+    const margin = (a.smoothing > 0 ? Math.ceil(sigmaImage * 2.5) : 0) + Math.ceil(this.splitReach() + this.simReach()) + 2;
     const x0 = Math.max(0, Math.floor(-view.originX / view.scale - margin));
     const y0 = Math.max(0, Math.floor(-view.originY / view.scale - margin));
     const x1 = Math.min(W, Math.ceil((canvas.width - view.originX) / view.scale + margin));
@@ -933,7 +1008,7 @@ export class Pipeline {
     const coverage = this.splitPass(inputs, adjusted, t, texelScale);
     const layered = this.layersPass(inputs.layers, coverage, t, texelScale);
     const visible = options.visible ?? [1, 1, 1, 1];
-    const mixed = options.mix ? this.mixPass(inputs.inkUniforms, visible, layered, t.source, t) : null;
+    const mixed = options.mix ? this.mixPass(inputs.inkUniforms, visible, layered, t.source, t, [region.x, region.y, region.width, region.height]) : null;
     return { source: t.source, layered, mixed };
   }
 
@@ -964,6 +1039,11 @@ export class Pipeline {
       inkUniforms: this.inputs.inkUniforms,
       smoothing: this.inputs.adjust.smoothing,
       splitReach: this.splitReach(),
+      simReach: this.simReach(),
+      sim: (purpose: SimPurpose) => {
+        const s = this.simSetup!;
+        return simUniforms(s.settings, purpose, s.W, s.H, s.scale, s.density);
+      },
       border: this.border ?? borderGeometry(this.host.settings.get().border, image.width, image.height, this.inputs.ctx.inkCount),
       halftone: this.halftoneState,
     };
@@ -995,6 +1075,9 @@ export interface ExportState {
   splitReach: number;
   /** Solid ink / paper border and the canvas it spans. */
   border: BorderGeometry;
+  /** Margin (image px) the print simulation needs, and its uniforms for an export. */
+  simReach: number;
+  sim(purpose: SimPurpose): Record<string, UniformValue>;
   /** Null for halftone None. reach = how far (output px) the halftone looks for coverage. */
   halftone: {
     method: HalftoneMethod;

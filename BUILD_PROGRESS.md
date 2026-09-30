@@ -17,8 +17,8 @@
 | 9 | Complete shared layer options | ✅ Done |
 | 10 | Remaining halftone types | ✅ Done |
 | 11 | Border | ✅ Done |
-| 12 | Print simulation | ⏳ Next |
-| 13 | Full export options | — |
+| 12 | Print simulation | ✅ Done |
+| 13 | Full export options | ⏳ Next |
 | 14 | Performance and polish | — |
 
 ## Decisions
@@ -271,6 +271,19 @@
   - With fade and a border together, the fade runs inward from the border's inner edge.
 - **Measured (riso export, scene image, 3 inks, 4 in / 300 DPI):** +4% solid border on ink 2 → 1264 px wide; top band 100% ink on layer 2 and 0% on the others; −4% keeps 1200 px with the same result; paper border 0% ink on all layers; fade to white → 0 ink on the very edge column vs 5–59% in the center column.
 - **Preview fix:** the smooth view's anti-aliased border edge blended with the preview background just outside the image (a faint light line); outside the image it now blends with the border color.
+
+### Step 12
+- **Where it runs:** `app/printSim.ts` holds one GLSL module used by the halftone compositor (preview), the export shaders and the mix pass (halftone None), plus the uniform builder. The effects act on each ink before mixing:
+  - **Misregistration:** each ink is read at its own shifted and rotated position (around the image center); a solid ink border moves with its ink. Shift in output px, rotation in degrees, seeded per ink.
+  - **Dot gain:** raises the tone every halftone type receives (`htCoverage` = gain(raw coverage)), so dots print bigger; midtone-weighted (c + 4a·c(1−c)) or uniform (c·(1 + 2a)); per-ink amount × paper absorbency (smooth 0.6, uncoated 1, recycled 1.4). Edge roughness jitters the sample position by value noise (~1.5 px), which rags dot edges.
+  - **Low-ink patches:** a slowly varying "lost ink" share per ink (blotches = rotated, domain-warped fractal noise; drum streaks = noise stretched along the feed direction; edge fade = falloff from one side), multiplied by a blurred coverage map (area-averaged to ~128 px) so solids starve first, then thresholded and feathered. Halftoned inks lose that share of their pixels as fine grain; smooth coverage is scaled down. Per-ink or shared seed.
+  - **Specks:** one candidate per grid cell (≥ 4 × the largest speck), with density per megapixel, size range, extra/pinhole ratio, clumping (large-scale noise), placement (extra near ink or anywhere), opacity (broken-up specks) and a per-ink switch.
+- **Modes:** effects show in the preview in both modes and are baked into Digital exports; riso layer exports never get them (verified bit-identical with the simulation on and off).
+- **Dot gain compensation** (Export, Print mode): pre-shrinks coverage by the inverse gain curve in riso layers (halftoned and smooth), and the Print mode preview shows the compensated dots. Measured with 12% midtone gain: ink 0.760/0.088/0.472 → 0.672/0.071/0.402.
+- **Stage:** "printSim" (after layer options) builds the coverage map when needed and the uniforms; mix and the compositor use them. Tile and detail margins grow by the misregistration reach.
+- **Performance:** with the effects off (riso layers, or Simulate printing off) a pass-through variant of the GLSL is compiled instead (only compensation stays). The full code in every shader had slowed the A3 riso export from 11 s to 68 s on the software GPU; with the variant it is back to 12 s.
+- **Test fix:** Step 9's knockout check and Step 6's summary rounding were test mistakes (fixed in Step 11). Running two browser tests at once on the software GPU makes timing-based checks fail; the suites are run one at a time.
+- **Known limits:** error diffusion's bitmap is built from raw coverage, so dot gain and compensation don't change it (misregistration, patches and specks do apply). Specks in the smooth view are sampled at working resolution.
 
 ## Open questions
 
