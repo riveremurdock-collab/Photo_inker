@@ -16,6 +16,7 @@ import {
   GLSL_LINEAR_TO_SRGB,
   uniformLocations,
 } from "../../engine/gl/program";
+import { GLSL_ROUNDED_RECT, type BorderGeometry } from "../../app/border";
 import { linearToSrgbChannel } from "../../util/color";
 
 const FRAGMENT = /* glsl */ `#version 300 es
@@ -29,8 +30,14 @@ uniform vec2 uOrigin;     // device px position of the image's top-left corner
 uniform float uScale;     // device px per image px
 uniform vec3 uBackground; // linear
 uniform vec3 uPaper;      // linear
+uniform int uFrameMode;   // 0 = no border
+uniform vec4 uFrameCanvas;
+uniform vec4 uFrameInner;
+uniform float uFrameRadius;
+uniform vec3 uFrameColor; // linear
 out vec4 outColor;
 ${GLSL_LINEAR_TO_SRGB}
+${GLSL_ROUNDED_RECT}
 void main() {
   vec2 p = vec2(gl_FragCoord.x, uViewSize.y - gl_FragCoord.y);
   vec2 ip = (p - uOrigin) / uScale;
@@ -44,6 +51,13 @@ void main() {
   if (all(greaterThanEqual(uv, vec2(0.0))) && all(lessThan(uv, vec2(1.0)))) {
     c = mix(uPaper, t.rgb, t.a); // transparent areas show the paper
   }
+  if (uFrameMode != 0 && all(greaterThanEqual(ip, uFrameCanvas.xy)) && all(lessThan(ip, uFrameCanvas.zw))) {
+    // Around the image (a border that grows the canvas) there is only border.
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThanEqual(uv, vec2(1.0)))) c = uFrameColor;
+    // Anti-aliased edge: blend over about one screen pixel.
+    float d = roundedRectSdf(ip, uFrameInner, uFrameRadius) * uScale;
+    c = mix(c, uFrameColor, clamp(d + 0.5, 0.0, 1.0));
+  }
   outColor = vec4(linearToSrgb(c), 1.0);
 }
 `;
@@ -54,6 +68,13 @@ export interface ViewTransform {
   /** Device px position of the image's top-left corner. */
   originX: number;
   originY: number;
+}
+
+/** A solid ink / paper border to draw around (or over the edge of) the image. */
+export interface FrameDisplay {
+  geometry: BorderGeometry;
+  /** Linear RGB. */
+  color: [number, number, number];
 }
 
 export interface DetailTexture {
@@ -95,6 +116,11 @@ const UNIFORMS = [
   "uScale",
   "uBackground",
   "uPaper",
+  "uFrameMode",
+  "uFrameCanvas",
+  "uFrameInner",
+  "uFrameRadius",
+  "uFrameColor",
 ] as const;
 
 export class ViewRenderer {
@@ -104,6 +130,7 @@ export class ViewRenderer {
   private source: DisplaySource | null = null;
   private magNearest = new WeakMap<WebGLTexture, boolean>();
   private paper: [number, number, number] = [1, 1, 1];
+  private frame: FrameDisplay | null = null;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -125,6 +152,10 @@ export class ViewRenderer {
   /** Paper color (linear RGB), shown through transparent parts of the image. */
   setPaper(paper: [number, number, number]): void {
     this.paper = paper;
+  }
+
+  setFrame(frame: FrameDisplay | null): void {
+    this.frame = frame;
   }
 
   setSource(source: DisplaySource | null): void {
@@ -175,6 +206,14 @@ export class ViewRenderer {
     gl.uniform1f(this.uniforms.uScale, view.scale);
     gl.uniform3f(this.uniforms.uBackground, ...this.background);
     gl.uniform3f(this.uniforms.uPaper, ...this.paper);
+    const f = this.frame?.geometry;
+    gl.uniform1i(this.uniforms.uFrameMode, f?.mode ?? 0);
+    if (f) {
+      gl.uniform4f(this.uniforms.uFrameCanvas, ...f.canvas);
+      gl.uniform4f(this.uniforms.uFrameInner, ...f.inner);
+      gl.uniform1f(this.uniforms.uFrameRadius, f.radius);
+      gl.uniform3f(this.uniforms.uFrameColor, ...this.frame!.color);
+    }
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 }

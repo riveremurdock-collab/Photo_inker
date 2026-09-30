@@ -3,7 +3,8 @@
 // the point under the cursor fixed; pan uses pointer capture), rewritten for
 // a viewport-sized WebGL canvas and devicePixelRatio.
 
-import { ViewRenderer, type DisplaySource, type ViewTransform } from "./viewRenderer";
+import { ViewRenderer, type DisplaySource, type ViewTransform, type FrameDisplay } from "./viewRenderer";
+import type { BorderGeometry } from "../../app/border";
 
 export type DisplayMode = "inks" | "original";
 
@@ -44,6 +45,9 @@ export class Preview {
 
   private imageWidth = 0;
   private imageHeight = 0;
+  /** Image px a border adds around the image on each side (the canvas is bigger than the image). */
+  private margin = 0;
+  private frame: FrameDisplay | null = null;
   private view: ViewTransform = { scale: 1, originX: 0, originY: 0 };
   /** While true, resizing the window refits the image. Cleared by any manual zoom or pan. */
   private fitted = true;
@@ -157,6 +161,19 @@ export class Preview {
     }
   }
 
+  /**
+   * Solid ink / paper border (see app/border.ts), drawn in the Inks view, with
+   * its color (linear RGB). A border that grows the canvas refits a fitted view.
+   */
+  setFrame(geometry: BorderGeometry, color: [number, number, number]): void {
+    this.frame = { geometry, color };
+    const margin = geometry.margin;
+    const refit = margin !== this.margin && this.fitted;
+    this.margin = margin;
+    if (refit) this.fit();
+    this.requestRender();
+  }
+
   /** Called when a new image is loaded: sets the image size and fits it to the screen. */
   setImageSize(width: number, height: number): void {
     this.imageWidth = width;
@@ -182,11 +199,14 @@ export class Preview {
     const pad = FIT_PADDING_CSS * this.dpr();
     const w = Math.max(1, this.canvas.width - pad * 2);
     const h = Math.max(1, this.canvas.height - pad * 2);
-    const scale = Math.min(w / this.imageWidth, h / this.imageHeight);
+    // Fit the whole canvas: the image plus any border around it.
+    const cw = this.imageWidth + 2 * this.margin;
+    const ch = this.imageHeight + 2 * this.margin;
+    const scale = Math.min(w / cw, h / ch);
     this.view = {
       scale,
-      originX: (this.canvas.width - this.imageWidth * scale) / 2,
-      originY: (this.canvas.height - this.imageHeight * scale) / 2,
+      originX: (this.canvas.width - cw * scale) / 2 + this.margin * scale,
+      originY: (this.canvas.height - ch * scale) / 2 + this.margin * scale,
     };
     this.fitted = true;
     this.changed();
@@ -203,7 +223,7 @@ export class Preview {
 
   private minScale(): number {
     if (!this.hasImage) return 0.01;
-    const fitScale = Math.min(this.canvas.width / this.imageWidth, this.canvas.height / this.imageHeight);
+    const fitScale = Math.min(this.canvas.width / (this.imageWidth + 2 * this.margin), this.canvas.height / (this.imageHeight + 2 * this.margin));
     return Math.min(fitScale / 4, 1);
   }
 
@@ -278,6 +298,8 @@ export class Preview {
     this.frameRequested = true;
     requestAnimationFrame(() => {
       this.frameRequested = false;
+      // The border belongs to the inked result; the Original view shows the image alone.
+      this.renderer.setFrame(this.displayMode === "inks" ? this.frame : null);
       this.renderer.render(this.view, this.imageWidth, this.imageHeight, this.interacting ? "fast" : "full");
     });
   }

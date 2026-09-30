@@ -13,6 +13,7 @@
 // Print simulation (Step 12) will be baked into Digital only.
 
 import { zipSync } from "fflate";
+import { borderGeometry, frameUniforms } from "../app/border";
 import { outputWidth } from "../app/output";
 import type { Target } from "../engine/gl/gpu";
 import { emptyRegionTargets, type ExportState, type Pipeline } from "../pipeline/pipeline";
@@ -43,8 +44,15 @@ export interface ExportResult {
 
 export interface ExportPlan {
   kind: "digital" | "riso";
+  /** Whole output, including a border that grows the canvas. */
   width: number;
   height: number;
+  /** The image's part of the output, and how far in from the canvas corner it starts (output px). */
+  imageWidth: number;
+  imageHeight: number;
+  offset: number;
+  /** Output px per image px. */
+  scale: number;
   dpi: number | null;
   format: "png" | "jpg" | "zip";
   inkCount: number;
@@ -52,15 +60,18 @@ export interface ExportPlan {
 
 /** What an export with the current settings would produce (for the panel summary). */
 export function planExport(settings: ProjectSettings, imageWidth: number, imageHeight: number): ExportPlan {
-  const width = outputWidth(settings, imageWidth);
-  const height = Math.max(1, Math.round((width * imageHeight) / imageWidth));
+  const iw = outputWidth(settings, imageWidth);
+  const ih = Math.max(1, Math.round((iw * imageHeight) / imageWidth));
+  const scale = iw / imageWidth;
+  // A border with positive thickness adds canvas around the image.
+  const offset = Math.round(borderGeometry(settings.border, imageWidth, imageHeight, settings.palette.inkCount).margin * scale);
+  const size = { width: iw + 2 * offset, height: ih + 2 * offset, imageWidth: iw, imageHeight: ih, offset, scale };
   if (settings.upload.mode === "print") {
-    return { kind: "riso", width, height, dpi: settings.export.dpi, format: "zip", inkCount: settings.palette.inkCount };
+    return { kind: "riso", ...size, dpi: settings.export.dpi, format: "zip", inkCount: settings.palette.inkCount };
   }
   return {
     kind: "digital",
-    width,
-    height,
+    ...size,
     dpi: null,
     format: settings.export.digitalFormat === "jpg" ? "jpg" : "png",
     inkCount: settings.palette.inkCount,
@@ -94,7 +105,7 @@ async function renderTiles(
   isCancelled: () => boolean,
 ): Promise<void> {
   const { gpu } = state;
-  const scale = plan.width / state.imageWidth; // output px per image px
+  const scale = plan.scale; // output px per image px
   const texelScale = Math.min(state.sourceScale, scale);
   const sigmaImage = (state.smoothing * Math.max(state.imageWidth, state.imageHeight)) / 1000;
   const margin =
@@ -116,11 +127,14 @@ async function renderTiles(
         const x0 = tx * TILE;
         const tw = Math.min(TILE, plan.width - x0);
 
-        // Image-px area this tile needs, with margin, clamped to the image.
-        const ix0 = Math.max(0, Math.floor(x0 / scale - margin));
-        const iy0 = Math.max(0, Math.floor(y0 / scale - margin));
-        const ix1 = Math.min(state.imageWidth, Math.ceil((x0 + tw) / scale + margin));
-        const iy1 = Math.min(state.imageHeight, Math.ceil((y0 + th) / scale + margin));
+        // Image-px area this tile needs, with margin, clamped to the image. (Tiles
+        // wholly in a border still render a sliver of image; the border covers it.)
+        const ox0 = x0 - plan.offset;
+        const oy0 = y0 - plan.offset;
+        const ix0 = Math.min(state.imageWidth - 1, Math.max(0, Math.floor(ox0 / scale - margin)));
+        const iy0 = Math.min(state.imageHeight - 1, Math.max(0, Math.floor(oy0 / scale - margin)));
+        const ix1 = Math.max(ix0 + 1, Math.min(state.imageWidth, Math.ceil((ox0 + tw) / scale + margin)));
+        const iy1 = Math.max(iy0 + 1, Math.min(state.imageHeight, Math.ceil((oy0 + th) / scale + margin)));
         const region = { x: ix0, y: iy0, width: ix1 - ix0, height: iy1 - iy0 };
         const r = pipeline.renderRegion(region, texelScale, targets, { mix: mode === 0 && !state.halftone });
 
@@ -128,10 +142,12 @@ async function renderTiles(
         gpu.pass(shader, output, {
           ...state.inkUniforms,
           ...(state.halftone?.methodUniforms ?? {}),
+          ...frameUniforms(state.border),
           uCoverage: { texture: r.layered.texture },
           uImage: { texture: r.source.texture },
           ...(r.mixed ? { uMixed: { texture: r.mixed.texture } } : {}),
-          uTileOrigin: [x0, y0],
+          // Output px measured from the image's corner, so halftones don't move with the border.
+          uTileOrigin: [ox0, oy0],
           uRegion: [region.x, region.y, region.width, region.height],
           uOutScale: scale,
           uMode: mode,
@@ -169,8 +185,8 @@ async function prepareExportBitmap(
   const h = state.halftone;
   if (!h?.method.fromCoverage) return { state, release: () => {} };
   const cell = h.method.fromCoverage.cell(h.values, h.ctx);
-  const gw = Math.ceil(plan.width / cell);
-  const gh = Math.ceil(plan.height / cell);
+  const gw = Math.ceil(plan.imageWidth / cell);
+  const gh = Math.ceil(plan.imageHeight / cell);
   if (Math.max(gw, gh) > state.gpu.maxTextureSize) {
     throw new Error(`Error diffusion at this size needs a larger dot size (the dot grid would be ${gw} × ${gh}).`);
   }
@@ -205,7 +221,7 @@ async function prepareExportBitmap(
   const bits = await h.method.fromCoverage.build(h.values, coverage, gw, gh, state.inkCount, "export");
   if (isCancelled()) throw new ExportCancelled();
   const previewTextures = new Set(Object.values(h.methodUniforms).flatMap((v) => (typeof v === "object" && v && "texture" in v ? [v.texture] : [])));
-  const methodUniforms = h.method.uniforms(h.values, h.ctx, h.prepared as never, { bits, width: gw, height: gh, cell: plan.width / gw });
+  const methodUniforms = h.method.uniforms(h.values, h.ctx, h.prepared as never, { bits, width: gw, height: gh, cell: plan.imageWidth / gw });
   return {
     state: { ...state, halftone: { ...h, methodUniforms } },
     // Free the export-only bitmap texture afterwards.

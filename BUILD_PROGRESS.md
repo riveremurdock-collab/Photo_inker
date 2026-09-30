@@ -16,8 +16,8 @@
 | 8 | Remaining color splitting methods | ✅ Done |
 | 9 | Complete shared layer options | ✅ Done |
 | 10 | Remaining halftone types | ✅ Done |
-| 11 | Border | ⏳ Next |
-| 12 | Print simulation | — |
+| 11 | Border | ✅ Done |
+| 12 | Print simulation | ⏳ Next |
 | 13 | Full export options | — |
 | 14 | Performance and polish | — |
 
@@ -259,6 +259,18 @@
   - Spiral ≤ 5.7 and rings ≤ 5.2 with 3 inks, but ≤ 0.5 with one ink. The gap is real: inks that share a center overlap in a fixed pattern rather than at random, as the smooth mix assumes. That is how these screens would print.
   - Full-resolution riso layers: per-patch coverage within 0.006 of smooth for hex, noise, spiral and rings.
   - Error diffusion re-diffuses in ~1.5 s (preview, SwiftShader); the UI stays responsive meanwhile.
+
+### Step 11
+- **Units:** all border sizes are % of the image's shorter side, so a border looks the same in the preview, the zoomed detail view and an export at any size or DPI.
+- **Fade:** runs inside the adjust pass, before levels/curve/saturation, so it is split and halftoned like the image. The strength comes from a 256-step table built on the CPU (linear, smooth, exponential or a custom point curve, then bent so it reaches 50% at the midpoint); the very edge is always the full fade color. Blended in sRGB so a linear fade looks even; it also makes transparent edges opaque. Every pass knows which image px it covers, so tiles and detail renders fade identically.
+- **Solid ink / paper border:** drawn after processing by the preview (compositor and smooth view) and the export, never split or halftoned. Solid ink sets its ink to 100% and removes every other ink there; paper removes all ink.
+  - Positive thickness grows the canvas: the preview fits the whole canvas, and the export grid gets the border added on each side (e.g. 1200 px image + 2 × 32 px at 4 in / 300 DPI). Export sizes in the panel are for the image; the summary shows the total.
+  - Negative thickness covers the image's edge; the canvas stays the same size.
+  - Halftone patterns stay anchored to the image, so adding a border never moves the dots.
+  - Corner radius rounds the image opening (the border's inner edge). The fade has its own corner radius and starts at the visible edge (inside a negative border).
+  - With fade and a border together, the fade runs inward from the border's inner edge.
+- **Measured (riso export, scene image, 3 inks, 4 in / 300 DPI):** +4% solid border on ink 2 → 1264 px wide; top band 100% ink on layer 2 and 0% on the others; −4% keeps 1200 px with the same result; paper border 0% ink on all layers; fade to white → 0 ink on the very edge column vs 5–59% in the center column.
+- **Preview fix:** the smooth view's anti-aliased border edge blended with the preview background just outside the image (a faint light line); outside the image it now blends with the border color.
 
 ## Open questions
 

@@ -8,6 +8,7 @@
 // zoomed-out views show the true average tone of the dots (not a blurred or
 // aliased version), and zoomed-in views show crisp, anti-aliased dots.
 
+import { GLSL_FRAME, GLSL_ROUNDED_RECT } from "../app/border";
 import type { Gpu, Target, UniformValue } from "../engine/gl/gpu";
 import { GLSL_INKS } from "../engine/gl/inkShader";
 import { GLSL_LINEAR_TO_SRGB, GLSL_SRGB_TO_LINEAR } from "../engine/gl/program";
@@ -37,6 +38,8 @@ out vec4 outColor;
 ${GLSL_SRGB_TO_LINEAR}
 ${GLSL_INKS}
 ${GLSL_LINEAR_TO_SRGB}
+${GLSL_ROUNDED_RECT}
+${GLSL_FRAME}
 
 // Coverage of an ink at output position p (with the image's transparency). Halftone code may call it.
 float htCoverage(int ink, vec2 p) {
@@ -66,8 +69,15 @@ void main() {
       vec2 f = (cell + fract(jitter + cell * vec2(0.618034, 0.754878))) / float(uSamples) - 0.5;
       vec2 ip = center + f * footprint;
       count += 1.0;
-      if (any(lessThan(ip, vec2(0.0))) || any(greaterThanEqual(ip, uImageSize))) {
+      // Outside the canvas (the image, plus a border that grows it): preview background.
+      if (frameOutsideCanvas(ip)) {
         sum += uBackground;
+        continue;
+      }
+      // Solid ink / paper border: drawn over everything, never halftoned.
+      if (frameCovers(ip)) {
+        int m = frameMask();
+        sum += uTable[m != 0 && uVisible[uFrameInk] > 0.5 ? m : 0];
         continue;
       }
       vec2 op = ip * uOutScale;  // output px
@@ -103,11 +113,17 @@ export class Compositor implements ProceduralSource {
   readonly kind = "procedural";
   private state: CompositorState | null = null;
   private shaders = new Map<string, string>();
+  private frame: Record<string, UniformValue> = {};
 
   constructor(private gpu: Gpu) {}
 
   set(state: CompositorState): void {
     this.state = state;
+  }
+
+  /** Solid ink / paper border uniforms (see app/border.ts). */
+  setFrame(frame: Record<string, UniformValue>): void {
+    this.frame = frame;
   }
 
   /** Samples per axis: enough to cover every output pixel under a screen pixel, within limits. */
@@ -124,6 +140,9 @@ export class Compositor implements ProceduralSource {
     this.gpu.draw(shader, null, canvasWidth, canvasHeight, {
       ...s.inkUniforms,
       ...s.methodUniforms,
+      uFrameCanvas: [0, 0, s.imageWidth, s.imageHeight],
+      uFrameMode: 0,
+      ...this.frame,
       uCoverage: { texture: s.coverage.texture },
       uImage: { texture: s.image.texture },
       uViewSize: [canvasWidth, canvasHeight],

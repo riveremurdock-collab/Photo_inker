@@ -1,8 +1,8 @@
 // The processing pipeline for the preview:
 //
-//   upload → adjust → split → layerOptions → mix ──────────────→ display (halftone None)
-//                                         └→ halftone compositor → display (AM / FM)
-//                           overlapTable ┘
+//   upload → fade + adjust → split → layerOptions → mix → border ─→ display (halftone None)
+//                                                     └→ halftone compositor → display (AM / FM)
+//                                   overlapTable ┘
 //
 // Every stage keeps its output and a key made of its own settings and the
 // versions of the stages it reads. A run walks the stages in order and reruns
@@ -15,8 +15,12 @@
 // just the visible area at full resolution ("detail"). Halftoned views don't
 // need it: the compositor evaluates dots at exact output resolution.
 //
-// Fade border, solid/paper border, and print simulation slot in later.
+// The fade border runs inside the adjust pass (before everything else). The
+// solid ink / paper border is drawn after halftoning, by the display and the
+// export, from the geometry the "border" stage computes. Print simulation
+// slots in later.
 
+import { borderGeometry, fadeLut, FADE_LUT_SIZE, frameUniforms, type BorderGeometry } from "../app/border";
 import { outputScale } from "../app/output";
 import type { SourceStore } from "../app/source";
 import type { SettingsStore } from "../app/store";
@@ -144,6 +148,10 @@ export class Pipeline {
   private analysisTarget: Target | null = null;
   private analysisVersion = -1;
   private toneTexture: WebGLTexture | null = null;
+  private fadeLutTexture: WebGLTexture | null = null;
+  /** Fade border uniforms for the adjust pass (also used by region renders). */
+  private fade: { key: string; uniforms: Record<string, UniformValue> } = { key: "off", uniforms: { uFade: 0 } };
+  private border: BorderGeometry | null = null;
   private inputs: PassInputs | null = null;
   private layerTone: { texture: WebGLTexture; key: string } | null = null;
 
@@ -220,11 +228,12 @@ export class Pipeline {
 
     const ok =
       this.runUpload(image.bitmap, image.version) &&
-      this.runAdjust(settings) &&
+      this.runAdjust(settings, image.width, image.height) &&
       this.runHistogram(settings) &&
       this.runSplit(settings) &&
       this.runLayers() &&
       this.runMix(settings) &&
+      this.runBorder(settings, image.width, image.height) &&
       this.runHalftone(settings, image.width, image.height);
     if (ok) this.renderDetail();
 
@@ -284,24 +293,65 @@ export class Pipeline {
 
   // ---- adjust: levels, contrast curve, saturation, smoothing ----
 
-  private runAdjust(settings: ProjectSettings): boolean {
+  private runAdjust(settings: ProjectSettings, W: number, H: number): boolean {
     const a = settings.adjust;
-    return this.stage("adjust", `${JSON.stringify(a)}|${this.version("upload")}`, () => {
+    this.setFade(settings, W, H);
+    return this.stage("adjust", `${JSON.stringify(a)}|${this.fade.key}|${this.version("upload")}`, () => {
       this.uploadTone(a.blackPoint, a.whitePoint, a.midtone, a.curve);
       const src = this.working!;
       // Smoothing radius is relative to the image's long edge, so it looks the same at any resolution.
       const sigma = (a.smoothing * Math.max(src.width, src.height)) / 1000;
-      this.adjustOutput = this.adjustPasses(a, src, this.main, sigma);
+      this.adjustOutput = this.adjustPasses(a, src, this.main, sigma, [0, 0, W, H]);
     });
   }
 
-  private adjustPasses(a: ProjectSettings["adjust"], src: Target, t: PassTargets, sigma: number): Target {
+  /** Resolves the fade border into uniforms for the adjust pass (and its cache key). */
+  private setFade(settings: ProjectSettings, W: number, H: number): void {
+    const b = settings.border;
+    if (!b.fade) {
+      this.fade = { key: "off", uniforms: { uFade: 0 } };
+      return;
+    }
+    const unit = Math.min(W, H) / 100;
+    // The fade starts at the visible edge: inside a border that covers the image's edge.
+    const rect = borderGeometry(b, W, H, settings.palette.inkCount).inner;
+    const radius = Math.min(b.fadeRadius * unit, Math.min(rect[2] - rect[0], rect[3] - rect[1]) / 2);
+    const key = JSON.stringify([b.fadeColor, b.fadeDistance, b.fadeOpacity, b.fadeCurve, b.fadeCustom, b.fadeMidpoint, rect, radius]);
+    if (this.fade.key === key) return;
+    const gl = this.gpu.gl;
+    this.fadeLutTexture ??= gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, this.fadeLutTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    const lut = Uint8Array.from(fadeLut(b), (v) => Math.round(v * 255));
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, FADE_LUT_SIZE, 1, 0, gl.RED, gl.UNSIGNED_BYTE, lut);
+    this.fade = {
+      key,
+      uniforms: {
+        uFade: 1,
+        uFadeRect: rect,
+        uFadeRadius: radius,
+        uFadeDistance: Math.max(0.5, b.fadeDistance * unit),
+        uFadeColor: b.fadeColor === "black" ? 0 : 1,
+        uFadeOpacity: b.fadeOpacity / 100,
+        uFadeLut: { texture: this.fadeLutTexture },
+      },
+    };
+  }
+
+  /** regionPx: the image px area src covers (x, y, width, height), for the fade. */
+  private adjustPasses(a: ProjectSettings["adjust"], src: Target, t: PassTargets, sigma: number, regionPx: number[]): Target {
     const { width: w, height: h } = src;
     t.adjusted = this.gpu.ensureTarget(t.adjusted, w, h, "image");
     this.gpu.pass(ADJUST, t.adjusted, {
+      ...this.fade.uniforms,
       uImage: { texture: src.texture },
       uTone: { texture: this.toneTexture! },
       uSaturation: a.saturation / 100,
+      uRegionPx: regionPx,
       uSize: [w, h],
     });
     if (a.smoothing <= 0) {
@@ -614,6 +664,22 @@ export class Pipeline {
     return t.mixed;
   }
 
+  // ---- border: solid ink / paper frame, drawn by the display and the export ----
+
+  private runBorder(settings: ProjectSettings, W: number, H: number): boolean {
+    const n = settings.palette.inkCount;
+    return this.stage("border", `${JSON.stringify(settings.border)}|${W}|${H}|${n}|${this.version("mix")}`, () => {
+      const g = borderGeometry(settings.border, W, H, n);
+      this.border = g;
+      const visible = this.visible(settings);
+      const mask = g.mode === 1 && visible[g.ink] ? 1 << g.ink : 0;
+      const table = this.inputs!.inkUniforms.uTable as Float32Array;
+      const color: [number, number, number] = [table[mask * 3]!, table[mask * 3 + 1]!, table[mask * 3 + 2]!];
+      this.compositor.setFrame(frameUniforms(g));
+      this.host.preview.setFrame(g, color);
+    });
+  }
+
   // ---- halftone: None shows the mixed texture; AM/FM go through the compositor ----
 
   private overrideTarget: Target | null = null;
@@ -863,7 +929,7 @@ export class Pipeline {
     });
     const a = inputs.adjust;
     const sigmaImage = (a.smoothing * Math.max(W, H)) / 1000;
-    const adjusted = this.adjustPasses(a, t.source, t, sigmaImage * (w / region.width));
+    const adjusted = this.adjustPasses(a, t.source, t, sigmaImage * (w / region.width), [region.x, region.y, region.width, region.height]);
     const coverage = this.splitPass(inputs, adjusted, t, texelScale);
     const layered = this.layersPass(inputs.layers, coverage, t, texelScale);
     const visible = options.visible ?? [1, 1, 1, 1];
@@ -898,6 +964,7 @@ export class Pipeline {
       inkUniforms: this.inputs.inkUniforms,
       smoothing: this.inputs.adjust.smoothing,
       splitReach: this.splitReach(),
+      border: this.border ?? borderGeometry(this.host.settings.get().border, image.width, image.height, this.inputs.ctx.inkCount),
       halftone: this.halftoneState,
     };
   }
@@ -926,6 +993,8 @@ export interface ExportState {
   smoothing: number;
   /** Extra margin (image px) the split method needs around a region. */
   splitReach: number;
+  /** Solid ink / paper border and the canvas it spans. */
+  border: BorderGeometry;
   /** Null for halftone None. reach = how far (output px) the halftone looks for coverage. */
   halftone: {
     method: HalftoneMethod;

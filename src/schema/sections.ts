@@ -273,11 +273,110 @@ export const halftoneSection = defineSection({
   ],
 });
 
+// Sizes are in % of the image's shorter side, so a border looks the same in
+// the preview and in an export at any size or DPI.
 export const borderSection = defineSection({
   id: "border",
   title: "Border",
   stage: "border",
-  settings: [],
+  settings: [
+    {
+      kind: "toggle",
+      key: "fade",
+      label: "Fade edges",
+      default: false,
+      help: "A soft vignette to black or white. Applied before processing, so it is split and halftoned like the rest of the image.",
+    },
+    {
+      kind: "select",
+      key: "fadeColor",
+      label: "Fade to",
+      default: "white",
+      display: "segmented",
+      options: [
+        { value: "white", label: "White" },
+        { value: "black", label: "Black" },
+      ],
+      visibleWhen: (b) => b.fade === true,
+    },
+    { kind: "number", key: "fadeDistance", label: "Fade distance", default: 12, min: 0.5, max: 50, step: 0.5, unit: "%", help: "How far the fade reaches in from the edge (% of the shorter side).", visibleWhen: (b) => b.fade === true },
+    { kind: "number", key: "fadeRadius", label: "Fade corner radius", default: 0, min: 0, max: 50, step: 0.5, unit: "%", visibleWhen: (b) => b.fade === true },
+    { kind: "number", key: "fadeOpacity", label: "Fade opacity", default: 100, min: 0, max: 100, step: 1, unit: "%", visibleWhen: (b) => b.fade === true },
+    {
+      kind: "select",
+      key: "fadeCurve",
+      label: "Fade curve",
+      default: "smooth",
+      options: [
+        { value: "linear", label: "Linear (even)" },
+        { value: "smooth", label: "Smooth (like a camera vignette)" },
+        { value: "exponential", label: "Exponential (strong at the edge, then drops off)" },
+        { value: "custom", label: "Custom" },
+      ],
+      visibleWhen: (b) => b.fade === true,
+    },
+    {
+      kind: "curve",
+      key: "fadeCustom",
+      label: "Custom fade (edge → inside)",
+      default: [
+        [0, 1],
+        [1, 0],
+      ],
+      visibleWhen: (b) => b.fade === true && b.fadeCurve === "custom",
+    },
+    {
+      kind: "number",
+      key: "fadeMidpoint",
+      label: "Fade midpoint",
+      default: 50,
+      min: 5,
+      max: 95,
+      step: 1,
+      unit: "%",
+      help: "Where the fade is at half strength, as a share of the fade distance.",
+      visibleWhen: (b) => b.fade === true,
+    },
+    {
+      kind: "select",
+      key: "frame",
+      label: "Border",
+      default: "none",
+      display: "segmented",
+      options: [
+        { value: "none", label: "None" },
+        { value: "ink", label: "Solid ink" },
+        { value: "paper", label: "Paper" },
+      ],
+      help: "Solid ink: one ink, not halftoned, with every other ink removed there. Paper: bare paper.",
+    },
+    {
+      kind: "select",
+      key: "frameInk",
+      label: "Border ink",
+      default: "0",
+      options: [
+        { value: "0", label: "Ink 1" },
+        { value: "1", label: "Ink 2" },
+        { value: "2", label: "Ink 3" },
+        { value: "3", label: "Ink 4" },
+      ],
+      visibleWhen: (b) => b.frame === "ink",
+    },
+    {
+      kind: "number",
+      key: "frameThickness",
+      label: "Thickness",
+      default: 4,
+      min: -25,
+      max: 25,
+      step: 0.25,
+      unit: "%",
+      help: "Positive grows the canvas outward around the image; negative covers the image's edge.",
+      visibleWhen: (b) => b.frame !== "none",
+    },
+    { kind: "number", key: "frameRadius", label: "Corner radius", default: 0, min: 0, max: 50, step: 0.5, unit: "%", help: "Rounds the corners of the image opening.", visibleWhen: (b) => b.frame !== "none" },
+  ],
 });
 
 export const printSimSection = defineSection({

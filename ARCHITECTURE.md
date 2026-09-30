@@ -203,6 +203,12 @@ This follows the outline's Rendering Engine section.
 - **Swappable model.** Rendering reads only the overlap table, so measured calibration (16 printed patches) can replace the spectral estimate later without changing the shader.
 - **Test view.** The temporary ink mixing test is `ui/inkTestView.ts`. It shows the swatch grid and ramps with Spectral, Multiply and Split modes, and is to be removed or hidden in Step 14.
 
+## 6a. Border (Step 11)
+
+- `app/border.ts` holds the geometry (canvas, image opening, corner radius, mode, ink), the fade table and the shared GLSL (`GLSL_ROUNDED_RECT`, `GLSL_FRAME`).
+- The **fade** is part of the adjust pass (`uRegionPx` tells each pass which image px it covers).
+- The **solid ink / paper border** is a "border" stage after mix that only computes geometry and color; the compositor, the smooth view (`ViewRenderer`) and the export shaders draw it. Positions are image px; a positive border extends the canvas to [−margin, W + margin]. Export plans carry the canvas size plus the image's offset in it, and tiles pass image-anchored output px to the halftone code.
+
 ## 6b. Export (Step 6)
 
 - `export/exporter.ts` renders the output pixel grid in 2048 px tiles.

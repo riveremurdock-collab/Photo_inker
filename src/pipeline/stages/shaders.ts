@@ -1,6 +1,7 @@
 // Fragment shaders for the GPU pipeline stages. All textures store row 0 at
 // the image top; passes compute uv from gl_FragCoord, so no flipping.
 
+import { GLSL_ROUNDED_RECT } from "../../app/border";
 import { GLSL_INKS } from "../../engine/gl/inkShader";
 import { GLSL_LIGHTNESS, GLSL_LINEAR_TO_SRGB, GLSL_SRGB_TO_LINEAR } from "../../engine/gl/program";
 
@@ -41,17 +42,39 @@ void main() {
 }
 `;
 
-/** Levels + contrast curve (one lookup table, applied to sRGB values) and saturation boost. */
+/**
+ * Fade border (first, so it is split and halftoned like the rest of the
+ * image), then levels + contrast curve (one lookup table, applied to sRGB
+ * values) and saturation boost.
+ */
 export const ADJUST = /* glsl */ `${HEADER}
 uniform sampler2D uImage;
 uniform sampler2D uTone;     // 256 × 1: levels then curve, in the red channel
 uniform float uSaturation;   // 0 = unchanged
+uniform vec4 uRegionPx;      // image px this pass covers: x, y, width, height
+uniform int uFade;
+uniform vec4 uFadeRect;      // the visible image edge, image px
+uniform float uFadeRadius;
+uniform float uFadeDistance; // image px
+uniform float uFadeColor;    // 0 black, 1 white
+uniform float uFadeOpacity;
+uniform sampler2D uFadeLut;  // 256 × 1: strength by distance / fade distance
 ${GLSL_LINEAR_TO_SRGB}
 ${GLSL_SRGB_TO_LINEAR}
+${GLSL_ROUNDED_RECT}
 float tone(float v) { return texture(uTone, vec2((v * 255.0 + 0.5) / 256.0, 0.5)).r; }
 void main() {
   vec4 t = texture(uImage, gl_FragCoord.xy / uSize);
   vec3 s = linearToSrgb(t.rgb);
+  if (uFade == 1) {
+    vec2 ip = uRegionPx.xy + gl_FragCoord.xy / uSize * uRegionPx.zw;
+    float d = -roundedRectSdf(ip, uFadeRect, uFadeRadius) / uFadeDistance;
+    float k = d <= 0.0 ? 1.0 : d >= 1.0 ? 0.0 : texture(uFadeLut, vec2((d * 255.0 + 0.5) / 256.0, 0.5)).r;
+    k *= uFadeOpacity;
+    // Blended in sRGB, so a linear fade looks even.
+    s = mix(s, vec3(uFadeColor), k);
+    t.a = mix(t.a, 1.0, k);
+  }
   vec3 lin = srgbToLinear(vec3(tone(s.r), tone(s.g), tone(s.b)));
   float y = dot(lin, vec3(0.2126, 0.7152, 0.0722));
   lin = clamp(y + (lin - y) * (1.0 + uSaturation), 0.0, 1.0);

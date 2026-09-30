@@ -6,6 +6,7 @@
 // Mode 1 (Riso layers): one ink per channel, 255 = paper, 0 = ink. Halftoned
 //   tiles sample each pixel once, so layers are pure black and white.
 
+import { GLSL_FRAME, GLSL_ROUNDED_RECT } from "../app/border";
 import { GLSL_INKS } from "../engine/gl/inkShader";
 import { GLSL_LINEAR_TO_SRGB, GLSL_SRGB_TO_LINEAR } from "../engine/gl/program";
 
@@ -14,7 +15,7 @@ precision highp float;
 precision highp int;
 uniform sampler2D uCoverage;  // region coverage (after layer options)
 uniform sampler2D uImage;     // region image, for transparency
-uniform vec2 uTileOrigin;     // output px of this tile's top-left corner
+uniform vec2 uTileOrigin;     // output px of this tile's top-left corner, from the image's corner
 uniform vec4 uRegion;         // image px covered by the region textures: x, y, w, h
 uniform float uOutScale;      // output px per image px
 uniform int uMode;            // 0 = digital color, 1 = riso layers
@@ -22,6 +23,8 @@ out vec4 outColor;
 ${GLSL_SRGB_TO_LINEAR}
 ${GLSL_INKS}
 ${GLSL_LINEAR_TO_SRGB}
+${GLSL_ROUNDED_RECT}
+${GLSL_FRAME}
 
 vec2 regionUv(vec2 outputPx) {
   return clamp((outputPx / uOutScale - uRegion.xy) / uRegion.zw, vec2(0.0), vec2(1.0));
@@ -41,6 +44,8 @@ ${methodGlsl}
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 
 int inkMask(vec2 p) {
+  // Solid ink / paper border: over everything, never halftoned.
+  if (frameCovers(p / uOutScale)) return frameMask();
   int mask = 0;
   for (int ink = 0; ink < 4; ink++) {
     if (ink >= uInkCount) break;
@@ -78,6 +83,17 @@ uniform sampler2D uMixed;     // region mixed color (sRGB texture: samples as li
 void main() {
   vec2 p = uTileOrigin + gl_FragCoord.xy;
   vec2 uv = regionUv(p);
+  if (frameCovers(p / uOutScale)) {
+    int mask = frameMask();
+    if (uMode == 1) {
+      vec4 gray = vec4(1.0);
+      for (int ink = 0; ink < 4; ink++) if ((mask & (1 << ink)) != 0) gray[ink] = 0.0;
+      outColor = gray;
+    } else {
+      outColor = vec4(linearToSrgb(uTable[mask]), 1.0);
+    }
+    return;
+  }
   if (uMode == 1) {
     vec4 cov = textureLod(uCoverage, uv, 0.0) * textureLod(uImage, uv, 0.0).a;
     vec4 gray = vec4(1.0);
