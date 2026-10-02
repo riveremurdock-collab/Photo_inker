@@ -569,16 +569,6 @@ body[data-mode="print"] .mode-badge {
   gap: 10px;
 }
 
-.control-inline {
-  grid-template-columns: 1fr auto;
-  align-items: center;
-}
-
-.control-inline .control-body {
-  grid-row: 1;
-  grid-column: 2;
-}
-
 .palette-heading {
   display: flex;
   justify-content: space-between;

@@ -37,7 +37,8 @@ export const amRingsSection = defineSection({
     { kind: "number", key: "angle", label: "Dot rotation", perInk: true, linkInks: false, default: 0, slotDefaults: [0, 15, 30, 45], min: 0, max: 360, step: 1, unit: "°", visibleWhen: (s) => !s.lines },
     { kind: "number", key: "centerX", label: "Center, across", default: 50, min: 0, max: 100, step: 0.5, unit: "%" },
     { kind: "number", key: "centerY", label: "Center, down", default: 50, min: 0, max: 100, step: 0.5, unit: "%" },
-    ...latticeDotSettings(),
+    // Lines use the dot size settings for their width, but have no dot shape.
+    ...latticeDotSettings().map((def) => (def.key === "shape" ? { ...def, visibleWhen: (s: Record<string, unknown>) => !s.lines } : def)),
   ],
 });
 

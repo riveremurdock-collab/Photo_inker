@@ -11,7 +11,6 @@ export function createChannelSplitBlock(store: SettingsStore): HTMLElement {
   const element = document.createElement("div");
   element.className = "channel-block";
   const advancedControl = createControl(findSetting("splitChannel", "advanced")!, false, (v) => setAdvanced(Boolean(v)));
-  advancedControl.element.classList.add("control-inline");
   const body = document.createElement("div");
   body.className = "channel-body";
   element.append(body, advancedControl.element);
@@ -69,12 +68,16 @@ export function createChannelSplitBlock(store: SettingsStore): HTMLElement {
         select.innerHTML =
           `<option value="none">Dropped</option>` +
           Array.from({ length: palette.inkCount }, (_, i) => `<option value="${i}">${inkLabel(i)}</option>`).join("");
-        select.value = String(get(inkKey));
-        if (select.value !== String(get(inkKey))) select.value = "none";
+        // A channel sent to an ink the palette doesn't have (e.g. Black with 3 inks) prints nowhere: show it as Dropped.
+        const show = (v: unknown) => {
+          select.value = String(v);
+          if (select.value !== String(v)) select.value = "none";
+        };
+        show(get(inkKey));
         select.addEventListener("change", () => set(inkKey, select.value));
         row.append(select);
         card.append(row);
-        controls.push({ key: inkKey, control: { element: row, update: (v) => (select.value = String(v)) } });
+        controls.push({ key: inkKey, control: { element: row, update: show } });
         add(card, `ch${c}Intensity`, "Intensity");
         add(card, `ch${c}Opacity`, "Opacity");
         body.append(card);

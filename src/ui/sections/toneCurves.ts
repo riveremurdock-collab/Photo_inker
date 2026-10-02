@@ -40,7 +40,6 @@ export function createToneCurvesBlock(store: SettingsStore): HTMLElement {
   const linkControl = createControl(findSetting("splitToneMap", "linkCurves")!, store.get().splitToneMap.linkCurves, (v) =>
     store.setValue("splitToneMap", "linkCurves", v),
   );
-  linkControl.element.classList.add("control-inline");
   const help = document.createElement("p");
   help.className = "control-help";
   help.textContent =

@@ -70,7 +70,6 @@ export function createPaletteBlock(
   const includeBgControl = createControl(includeBgDef, store.get().palette.autoIncludeBackground, (v) =>
     store.setValue("palette", "autoIncludeBackground", v),
   );
-  includeBgControl.element.classList.add("control-inline");
   const autoNote = document.createElement("p");
   autoNote.className = "control-help";
 
@@ -83,7 +82,6 @@ export function createPaletteBlock(
     store.get().palette.schemeIncludeBackground,
     (v) => store.setValue("palette", "schemeIncludeBackground", v),
   );
-  schemeBgControl.element.classList.add("control-inline");
   const schemeNote = document.createElement("p");
   schemeNote.className = "control-help";
 
