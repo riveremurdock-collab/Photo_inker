@@ -41,8 +41,8 @@ export interface HalftoneContext {
   outputHeight: number;
   /**
    * Whole-image analysis of the adjusted image (luminance, gradient), computed
-   * once on first request and shared by every ink layer. None of the current
-   * types need it; structure-aware types will.
+   * once on first request and shared by every ink layer. The Turing pattern
+   * uses it to follow the image.
    */
   analysis(): Target;
 }
@@ -50,6 +50,15 @@ export interface HalftoneContext {
 export interface OutputInfo {
   outputWidth: number;
   outputHeight: number;
+  /** For types grown on the GPU (Turing pattern). */
+  gpu?: Gpu;
+  inkCount?: number;
+  /** Whole-image analysis (as HalftoneContext.analysis), for types that follow the image. */
+  analysis?(): Target;
+  /** Changes whenever the adjusted image does (part of the cache key of types that follow it). */
+  imageKey?: string;
+  /** prepare() only: report progress (0–1) of a long build, shown in the status bar. */
+  progress?(fraction: number): void;
 }
 
 /** A bitmap built from the whole image's coverage (see fromCoverage). */

@@ -31,7 +31,7 @@ import { Gpu, type Target, type UniformValue } from "../engine/gl/gpu";
 import { LIGHTNESS_SOURCES } from "../engine/gl/program";
 import { inkSetupFrom, OverlapTableCache } from "../engine/spectral/overlapTable";
 import { halftoneMethod } from "../plugins/halftone/registry";
-import type { CoverageBitmap, HalftoneContext, HalftoneMethod } from "../plugins/halftone/types";
+import type { CoverageBitmap, HalftoneContext, HalftoneMethod, OutputInfo } from "../plugins/halftone/types";
 import { splitMethod } from "../plugins/splitting/registry";
 import type { SplitContext, SplitMethod } from "../plugins/splitting/types";
 import type { ProjectSettings } from "../schema/sections";
@@ -818,7 +818,14 @@ export class Pipeline {
 
     const values = (settings as unknown as Record<string, Record<string, unknown>>)[method.section.id] as never;
     const outW = Math.round(imageWidth * scale);
-    const info = { outputWidth: outW, outputHeight: Math.max(1, Math.round((outW * imageHeight) / imageWidth)) };
+    const info = {
+      outputWidth: outW,
+      outputHeight: Math.max(1, Math.round((outW * imageHeight) / imageWidth)),
+      gpu: this.gpu,
+      inkCount: settings.palette.inkCount,
+      analysis: () => this.analysis(),
+      imageKey: String(this.version("adjust")),
+    };
     const showSmoothMeanwhile = () => {
       this.halftoned = false;
       this.keys.delete("halftone");
@@ -922,10 +929,15 @@ export class Pipeline {
     return this.gpu.read(this.coverageRead);
   }
 
-  private startHalftonePrepare(pkey: string, method: HalftoneMethod, values: never, info: { outputWidth: number; outputHeight: number }): void {
+  private startHalftonePrepare(pkey: string, method: HalftoneMethod, values: never, info: OutputInfo): void {
     this.halftonePreparing = pkey;
-    this.setBusy("halftone", method.id === "spiral" ? "Building spiral…" : "Building halftone map…");
-    method.prepare!(values, info)
+    const busy: Record<string, string> = { spiral: "Building spiral…", turing: "Growing Turing pattern…" };
+    const label = busy[method.id] ?? "Building halftone map…";
+    this.setBusy("halftone", label);
+    const progress = (f: number) => {
+      if (this.halftonePreparing === pkey) this.setBusy("halftone", `${label} ${Math.round(f * 100)}%`);
+    };
+    method.prepare!(values, { ...info, progress })
       .then((value) => {
         if (this.halftonePreparing !== pkey) return;
         this.halftonePrepared = { key: pkey, methodId: method.id, value, id: ++this.preparedCount };

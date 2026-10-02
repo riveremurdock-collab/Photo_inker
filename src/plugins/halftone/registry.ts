@@ -7,13 +7,14 @@ import { amNoise, amNoiseSection } from "./amNoise";
 import { amRings, amRingsSection } from "./amRings";
 import { amSpiral, amSpiralSection } from "./amSpiral";
 import { amSquare, amSquareSection } from "./amSquare";
+import { amTuring, amTuringSection } from "./amTuring";
 import { fmBlueNoise, fmBlueNoiseSection } from "./fmBlueNoise";
 import { fmDiffusion, fmDiffusionSection } from "./fmDiffusion";
 import { fmStipple, fmStippleSection } from "./fmStipple";
 import type { HalftoneMethod } from "./types";
 
 // In the outline's order: AM grids, then FM placements.
-const METHODS = [amSquare, amHex, amNoise, amSpiral, amRings, fmBlueNoise, fmStipple, fmDiffusion];
+const METHODS = [amSquare, amHex, amNoise, amSpiral, amRings, amTuring, fmBlueNoise, fmStipple, fmDiffusion];
 
 export const HALFTONE_SECTIONS = [
   amSquareSection,
@@ -21,6 +22,7 @@ export const HALFTONE_SECTIONS = [
   amNoiseSection,
   amSpiralSection,
   amRingsSection,
+  amTuringSection,
   fmBlueNoiseSection,
   fmStippleSection,
   fmDiffusionSection,

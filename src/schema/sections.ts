@@ -245,7 +245,7 @@ export const layersSection = defineSection({
 // after the chosen type's settings.
 
 /** AM types (grids of dots that grow with tone), which can round light tones up to the minimum dot. */
-const AM_TYPES = ["am", "hex", "noise", "spiral", "rings"];
+const AM_TYPES = ["am", "hex", "noise", "spiral", "rings", "turing"];
 export const halftoneSection = defineSection({
   id: "halftone",
   title: "Halftone",

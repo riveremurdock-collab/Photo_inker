@@ -322,6 +322,12 @@
 - **Resolution:** 300 / 600 / 1200 DPI buttons plus Custom (`dpiPreset`, `dpi`); `exportDpi()` gives the value.
 - **sRGB profile:** hidden for riso layers unless the color proof (the only color file) is included.
 
+### AM: Turing pattern (2026-10-02)
+- **New halftone type** (requested): lines from a Turing pattern, thicker in darker areas, from no line on white to lines touching at 100%. Settings: Pattern size (Repeating tile / Whole image, with a warning), Same pattern for all inks, Line spacing (per ink, or one when shared), Lines ↔ spots, Branching, Order, Direction (per ink or shared), Wobble, Follow image (Whole image only), Random seed, Maximum line width, Line width curve; plus the shared minimum dot and drop/round-up.
+- **How:** see ARCHITECTURE (halftone types). Grown on the GPU in 50 iterations (90 looked no different).
+- **Measured (Intel UHD 630):** tile 2.8 s (maze) to 6.2 s (ordered); Whole image with Follow image on a Letter page at 600 DPI, own pattern per ink: 111 s for 3 inks (about 37 s per ink, 12 M texels each), with progress in the status bar. Tone vs smooth coverage on a gray ramp, per 1/12 band: within 0.6 points (maze and spots) and 1.2 points (ordered, branching 80%), after measuring the distribution with the same bilinear interpolation the halftone uses (raw texels gave up to 4.5 points: light tones too light, dark too dark).
+- **Checked:** cancelling builds mid-way frees their textures; a too-large whole-image field gives a notice; riso (with proof) and digital exports; all 10 halftone types × 5 split methods × modes × simulation with no errors.
+
 ## Open questions
 
 - None right now.
