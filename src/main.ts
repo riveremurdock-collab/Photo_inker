@@ -20,6 +20,7 @@ import { createChannelSplitBlock } from "./ui/sections/channelSplit";
 import { createSelectiveColorBlock } from "./ui/sections/selectiveColor";
 import { outputLayout } from "./app/layout";
 import { layerLabels, markShapes } from "./export/marks";
+import { GPU_RESET_MESSAGE } from "./export/exporter";
 
 const DEBUG = new URLSearchParams(location.search).has("debug");
 
@@ -45,17 +46,26 @@ function start(root: HTMLElement): void {
   notice.className = "notice";
   notice.setAttribute("role", "alert");
   notice.hidden = true;
-  const showNotice = (message: string, kind: "error" | "info" = "error") => {
+  const showNotice = (message: string, kind: "error" | "info" = "error", action?: { label: string; onClick: () => void }) => {
     notice.innerHTML = "";
     notice.className = `notice notice-${kind}`;
     const text = document.createElement("span");
     text.textContent = message;
+    notice.append(text);
+    if (action) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "notice-action";
+      b.textContent = action.label;
+      b.addEventListener("click", action.onClick);
+      notice.append(b);
+    }
     const close = document.createElement("button");
     close.type = "button";
     close.textContent = "×";
     close.setAttribute("aria-label", "Dismiss");
     close.addEventListener("click", () => (notice.hidden = true));
-    notice.append(text, close);
+    notice.append(close);
     notice.hidden = false;
   };
 
@@ -119,6 +129,8 @@ function start(root: HTMLElement): void {
     return;
   }
   preview.element.append(notice);
+  // The GPU driver can reset (e.g. after a very long draw); the WebGL context is then gone for good.
+  preview.onContextLost(() => showNotice(GPU_RESET_MESSAGE, "error", { label: "Reload", onClick: () => location.reload() }));
 
   // ---- Palette + eyedropper ----
   const palette = new PaletteActions(settings, source);
@@ -133,21 +145,23 @@ function start(root: HTMLElement): void {
   );
   const paletteBlock = createPaletteBlock(settings, source, palette, eyedropper);
 
-  // TEMPORARY (Step 3): ink mixing test view over the preview area.
-  const inkTest = new InkTestView(settings, DEBUG);
-  preview.element.append(inkTest.element);
-  const inkTestButton = document.createElement("button");
-  inkTestButton.type = "button";
-  inkTestButton.className = "ink-test-open";
-  inkTestButton.textContent = "Show ink mixing test";
-  inkTestButton.addEventListener("click", () => {
-    inkTest.toggle();
-    inkTestButton.textContent = inkTest.open ? "Hide ink mixing test" : "Show ink mixing test";
-  });
-  new MutationObserver(() => {
-    inkTestButton.textContent = inkTest.open ? "Hide ink mixing test" : "Show ink mixing test";
-  }).observe(inkTest.element, { attributes: true, attributeFilter: ["hidden"] });
-  paletteBlock.append(inkTestButton);
+  // Ink mixing test view (a development tool): only with ?debug in the URL.
+  if (DEBUG) {
+    const inkTest = new InkTestView(settings, DEBUG);
+    preview.element.append(inkTest.element);
+    const inkTestButton = document.createElement("button");
+    inkTestButton.type = "button";
+    inkTestButton.className = "ink-test-open";
+    inkTestButton.textContent = "Show ink mixing test";
+    inkTestButton.addEventListener("click", () => {
+      inkTest.toggle();
+      inkTestButton.textContent = inkTest.open ? "Hide ink mixing test" : "Show ink mixing test";
+    });
+    new MutationObserver(() => {
+      inkTestButton.textContent = inkTest.open ? "Hide ink mixing test" : "Show ink mixing test";
+    }).observe(inkTest.element, { attributes: true, attributeFilter: ["hidden"] });
+    paletteBlock.append(inkTestButton);
+  }
 
   const showPaper = () => {
     const rgb = hexToRgb(settings.get().palette.paper) ?? { r: 255, g: 255, b: 255 };
@@ -162,6 +176,7 @@ function start(root: HTMLElement): void {
     busyMessage = message;
     updateStatus();
   });
+  pipeline.onError((message) => showNotice(message));
 
   // ---- Panel ----
   const panel = new Panel(settings, {

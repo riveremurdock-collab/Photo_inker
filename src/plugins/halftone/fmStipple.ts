@@ -12,6 +12,7 @@ import {
   STIPPLE_TILE,
   type StippleParams,
 } from "../../engine/halftone/stipple";
+import { TextureCache } from "../../engine/gl/textureCache";
 import { defineSection } from "../../schema/types";
 import { createRng } from "../../util/rng";
 import { halftoneWorker } from "./halftoneWorker";
@@ -332,17 +333,16 @@ float htInk(int ink, vec2 p, float c) {
 let empty: Uint8Array | null = null;
 const emptyPoints = () => (empty ??= new Uint8Array(T * S * T * 4).fill(255));
 const emptyTable = new Float32Array(STIPPLE_LEVELS).fill(-1);
-const pointTextures = new WeakMap<Uint8Array, { gl: WebGL2RenderingContext; texture: WebGLTexture }>();
+const pointTextures = new TextureCache<Uint8Array>();
 
 function pointsTexture(gl: WebGL2RenderingContext, data: Uint8Array): WebGLTexture {
-  const cached = pointTextures.get(data);
-  if (cached && cached.gl === gl) return cached.texture;
-  const texture = gl.createTexture()!;
-  gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, T * S, T, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
-  pointTextures.set(data, { gl, texture });
-  return texture;
+  return pointTextures.get(gl, data, () => {
+    const texture = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, T * S, T, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+    return texture;
+  });
 }

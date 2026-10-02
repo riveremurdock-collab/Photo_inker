@@ -29,6 +29,7 @@ export type UniformValue =
 export class Gpu {
   private programs = new Map<string, { program: WebGLProgram; uniforms: Map<string, WebGLUniformLocation | null> }>();
   private uniformTypes = new Map<WebGLProgram, Map<string, number>>();
+  private pixel = new Uint8Array(4);
 
   constructor(readonly gl: WebGL2RenderingContext) {}
 
@@ -70,13 +71,17 @@ export class Gpu {
     this.draw(fragmentSource, target.framebuffer, target.width, target.height, uniforms);
   }
 
-  /** Like pass(), but into any framebuffer (null = the canvas). */
+  /**
+   * Like pass(), but into any framebuffer (null = the canvas). `rows` limits
+   * the draw to a band of rows (y = first row in GL coordinates, from the bottom).
+   */
   draw(
     fragmentSource: string,
     framebuffer: WebGLFramebuffer | null,
     width: number,
     height: number,
     uniforms: Record<string, UniformValue>,
+    rows?: { y: number; height: number },
   ): void {
     const gl = this.gl;
     const { program, uniforms: locations } = this.program(fragmentSource);
@@ -84,6 +89,10 @@ export class Gpu {
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
     gl.viewport(0, 0, width, height);
     gl.disable(gl.BLEND);
+    if (rows) {
+      gl.enable(gl.SCISSOR_TEST);
+      gl.scissor(0, rows.y, width, rows.height);
+    }
 
     let unit = 0;
     const types = this.uniformTypes.get(program)!;
@@ -129,6 +138,15 @@ export class Gpu {
       }
     }
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    if (rows) gl.disable(gl.SCISSOR_TEST);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  /** Blocks until the GPU has finished everything drawn so far (a 1-pixel read forces it). */
+  finish(framebuffer: WebGLFramebuffer | null): void {
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, this.pixel);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 

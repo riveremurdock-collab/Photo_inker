@@ -300,6 +300,18 @@
 - **Tests:** earlier suites now choose "Image only" + Image width (the old Print width) and switch off the proof and sheet, so they keep testing the same files.
 - **Fixed during testing:** registration targets in the reduced-resolution proof had a stray line (a stamp lookup read outside the stamp); a literal NUL byte slipped into `icc.ts` from an edit script and was replaced with an escape.
 
+### Diagnostic pass (2026-10-02, before Step 14)
+- **Stipple crash fixed:** at high output resolution one stipple preview draw ran past the ~2 s Windows GPU watchdog (measured 2.1 s for a 530 × 530 view at 3× on Intel UHD 630; 64 samples per pixel × up to ~400 dots per sample), so the driver reset and the WebGL context was lost. The compositor and the export output pass now draw in timed bands (`engine/gl/bands.ts`). Measured after: 1230 × 930 view at ~7× output in 132 bands, slowest 177 ms; stipple riso export with proof at 600 DPI, slowest job 170 ms.
+- **Export settings lock:** the export reread live pipeline state per tile, so a change during an export gave a file split between old and new settings (confirmed with a seam in an A3 1200 DPI layer). The pipeline is now held during exports.
+- **GPU reset notice** with a Reload button; the pipeline stops running once the context is lost.
+- **Export size limits** (32768 px per side, 1,000 MP, PDF pages ≤ 200 in) shown under the summary, with the button disabled.
+- **Ink mixing test** now only with `?debug` (it also made a second WebGL context on every load).
+- **Print sheet:** the total ink limit was listed twice (Layers is a sub-section of Color Splitting); changed per-ink layer options (density, invert, levels, curve, knockout, choke/spread) are now listed.
+- **Background failures** (Ink Matching, halftone maps, dithering) show a notice instead of failing silently.
+- **GPU memory:** textures from worker results are capped (`engine/gl/textureCache.ts`); the shared float-table cache keeps the last 64.
+- **Checked:** all 180 combinations of mode × simulation × split method × halftone type with no errors; every export format; the production build under the site's CSP (`kawa_website/public/_headers`).
+- **Website, left for later:** the site's CSP has no `blob:` in `img-src`, which the fallback image loader for older browsers needs; `npm run build:site` and an embed page are not done yet.
+
 ## Open questions
 
 - None right now.

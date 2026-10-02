@@ -157,6 +157,8 @@ upload → fadeBorder → adjust → split → layerOptions → halftone → bor
   - Solo/mute reruns only `mix`.
   - Invert/density rerun `layerOptions` and `mix`.
   - An Ink Matching ink color change reruns `mix` at once (old coverage, new colors), then `split` when the new lookup table arrives. `adjust` is never rerun for any of these.
+- **GPU time per draw.** Windows resets the graphics driver when one GPU job runs over about 2 s, which loses the WebGL context. Heavy full-screen draws (the halftone compositor and the export output pass) are drawn in bands of rows (`engine/gl/bands.ts`): each band is waited for and timed, and the learned cost per shader sizes the next band to about 60 ms. The preview fills in over several frames when a view needs more than about 120 ms. If the context is lost anyway, a notice offers a reload.
+- **GPU memory.** Textures made from worker results (point sets, noise fields, Ink Matching tables, diffusion bitmaps) go through `engine/gl/textureCache.ts`, which keeps the last two and deletes older ones.
 - **Superseding.** `WorkerClient` drops superseded worker results, and the worker itself stops a superseded table build at the next slice.
 - **Data between stages.**
   - Images are `SRGB8_ALPHA8` textures: linear-light values, sRGB-encoded storage, so there is no float-render extension to depend on.
@@ -201,7 +203,7 @@ This follows the outline's Rendering Engine section.
   - Linear light throughout: mixing, resizing, and zoomed-out averaging (mipmaps built in linear light) all happen in linear light.
   - **Gamut compression.** `gamutCompress()` handles colors that fall outside sRGB (vivid overlaps). They are desaturated toward their own luminance just enough to fit, which keeps their hue, instead of having each channel clipped. Colors inside sRGB are untouched, so a solid ink always shows exactly the picked color.
 - **Swappable model.** Rendering reads only the overlap table, so measured calibration (16 printed patches) can replace the spectral estimate later without changing the shader.
-- **Test view.** The temporary ink mixing test is `ui/inkTestView.ts`. It shows the swatch grid and ramps with Spectral, Multiply and Split modes, and is to be removed or hidden in Step 14.
+- **Test view.** The ink mixing test is `ui/inkTestView.ts`. It shows the swatch grid and ramps with Spectral, Multiply and Split modes. It is a development tool, shown only with `?debug` in the URL.
 
 ## 6a. Border (Step 11)
 
@@ -217,6 +219,8 @@ This follows the outline's Rendering Engine section.
 ## 6b. Export (Step 6)
 
 - `export/exporter.ts` renders the output pixel grid in 2048 px tiles.
+  - The pipeline is held for the whole export (`Pipeline.hold`): it doesn't rerun, so settings changed meanwhile can't reach a half-written file; they reach the preview when the export ends.
+  - Exports over 32768 px per side or 1,000 megapixels, and PDF pages over 200 in, are refused with a message (`exportProblem`).
   - For each tile, `Pipeline.renderRegion()` reruns copy → adjust → split → layer options for the matching image area (plus a margin), from the full-size source, at min(output, source) resolution. It is the same function the zoom detail view uses.
   - An output pass (`export/shaders.ts`) then writes either Digital color (the halftone method's GLSL with 2×2 samples per pixel, like the preview at 100%) or Riso layers (one ink per channel, 1 sample per pixel, so pure black/white; smooth for None).
 - Strips of tiles stream into `export/png.ts` (our streaming PNG encoder: the browser's `CompressionStream("deflate")`, pHYs DPI, sRGB chunk; fflate's streaming zlib was dropped in Step 10 after it produced corrupt data) or into a canvas for JPG. Riso PNGs are zipped with fflate.

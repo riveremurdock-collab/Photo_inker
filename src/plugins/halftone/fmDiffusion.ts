@@ -5,6 +5,7 @@
 // reads it. The preview builds it at up to 2048 cells across; export builds it
 // at full output resolution.
 
+import { TextureCache } from "../../engine/gl/textureCache";
 import type { DiffusionOptions, Kernel } from "../../engine/halftone/errorDiffusion";
 import { defineSection } from "../../schema/types";
 import { halftoneWorker } from "./halftoneWorker";
@@ -121,17 +122,16 @@ float htInk(int ink, vec2 p, float c) {
 `,
   uniforms(values, ctx, _prepared, bitmap) {
     const gl = ctx.gpu.gl;
-    let texture = bitmapTextures.get(bitmap ?? emptyBitmap);
-    if (!texture) {
+    const texture = bitmapTextures.get(gl, bitmap ?? emptyBitmap, () => {
       const b = bitmap ?? emptyBitmap;
-      texture = gl.createTexture()!;
-      gl.bindTexture(gl.TEXTURE_2D, texture);
+      const tex = gl.createTexture()!;
+      gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, b.width, b.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, b.bits);
-      bitmapTextures.set(b, texture);
-    }
+      return tex;
+    });
     const b = bitmap ?? emptyBitmap;
     return {
       uEdBits: { texture },
@@ -143,4 +143,4 @@ float htInk(int ink, vec2 p, float c) {
 });
 
 const emptyBitmap = { bits: new Uint8Array(4), width: 1, height: 1, cell: 1 };
-const bitmapTextures = new WeakMap<object, WebGLTexture>();
+const bitmapTextures = new TextureCache<object>();

@@ -56,6 +56,8 @@ export class Preview {
   /** While true, resizing the window refits the image. Cleared by any manual zoom or pan. */
   private fitted = true;
   private frameRequested = false;
+  /** The next frame starts the view over (something changed) rather than continuing a partly drawn one. */
+  private restart = true;
   private interacting = false;
   private settleTimer: ReturnType<typeof setTimeout> | null = null;
   private pointers = new Map<number, { x: number; y: number }>();
@@ -125,6 +127,11 @@ export class Preview {
   setPaper(linear: [number, number, number]): void {
     this.renderer.setPaper(linear);
     this.requestRender();
+  }
+
+  /** Called if the GPU drops the WebGL context (e.g. a driver reset). */
+  onContextLost(listener: () => void): void {
+    this.canvas.addEventListener("webglcontextlost", listener);
   }
 
   /** Turns eyedropper picking on (handler) or off (null). */
@@ -322,17 +329,29 @@ export class Preview {
   }
 
   requestRender(): void {
+    this.restart = true;
     if (this.frameRequested) return;
     this.frameRequested = true;
-    requestAnimationFrame(() => {
-      this.frameRequested = false;
-      // The border belongs to the inked result; the Original view shows the image alone.
-      this.renderer.setFrame(this.displayMode === "inks" ? this.frame : null);
-      this.renderer.render(this.view, this.imageWidth, this.imageHeight, this.interacting ? "fast" : "full");
+    requestAnimationFrame(() => this.renderFrame());
+  }
+
+  private renderFrame(): void {
+    this.frameRequested = false;
+    const restart = this.restart;
+    this.restart = false;
+    // The border belongs to the inked result; the Original view shows the image alone.
+    this.renderer.setFrame(this.displayMode === "inks" ? this.frame : null);
+    const done = this.renderer.render(this.view, this.imageWidth, this.imageHeight, this.interacting ? "fast" : "full", restart);
+    if (restart) {
       const ctx = this.overlay.getContext("2d")!;
       ctx.clearRect(0, 0, this.overlay.width, this.overlay.height);
       if (this.page && this.hasImage) drawPage(ctx, this.page, this.view, this.dpr());
-    });
+    }
+    // A heavy halftone draws in bands over several frames; keep going until the view is complete.
+    if (!done && !this.frameRequested) {
+      this.frameRequested = true;
+      requestAnimationFrame(() => this.renderFrame());
+    }
   }
 
   private devicePoint(e: { clientX: number; clientY: number }): { x: number; y: number } {

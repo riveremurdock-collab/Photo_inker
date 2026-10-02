@@ -9,6 +9,7 @@
 // offset (from the seed), so layers are placed independently. The noise
 // amount only scales the nudges in the shader, so changing it is instant.
 
+import { TextureCache } from "../../engine/gl/textureCache";
 import { NOISE_FIELD_SIZE, type NoiseKind } from "../../engine/halftone/noiseField";
 import { defineSection } from "../../schema/types";
 import { createRng } from "../../util/rng";
@@ -153,17 +154,16 @@ function tileKey(values: { noise: unknown; cluster: unknown; seed: unknown }): s
 
 /** Neutral field (no nudges) until the worker's field arrives. */
 const emptyTile = new Uint8Array(TILE * TILE * 2).fill(128);
-const tileTextures = new WeakMap<Uint8Array, WebGLTexture>();
+const tileTextures = new TextureCache<Uint8Array>();
 
 function tileTexture(gl: WebGL2RenderingContext, data: Uint8Array): WebGLTexture {
-  let texture = tileTextures.get(data);
-  if (texture) return texture;
-  texture = gl.createTexture()!;
-  gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 2);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG8, TILE, TILE, 0, gl.RG, gl.UNSIGNED_BYTE, data);
-  tileTextures.set(data, texture);
-  return texture;
+  return tileTextures.get(gl, data, () => {
+    const texture = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 2);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG8, TILE, TILE, 0, gl.RG, gl.UNSIGNED_BYTE, data);
+    return texture;
+  });
 }

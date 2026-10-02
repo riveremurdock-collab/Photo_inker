@@ -7,6 +7,7 @@
 // needs) is shared by all inks: each ink's spacing and rotation are just a
 // change of coordinates.
 
+import { TextureCache } from "../../engine/gl/textureCache";
 import type { SpiralBuckets } from "../../engine/halftone/spiral";
 import { nearestSpiral } from "../../engine/halftone/spiral";
 import { defineSection } from "../../schema/types";
@@ -119,17 +120,16 @@ ${GLSL_LATTICE_HT}
   uniforms(values, ctx, table) {
     const v = values as unknown as Values;
     const gl = ctx.gpu.gl;
-    let texture = spiralTextures.get(table ?? emptyTable);
-    if (!texture) {
+    const texture = spiralTextures.get(gl, table ?? emptyTable, () => {
       const t = table ?? emptyTable;
-      texture = gl.createTexture()!;
-      gl.bindTexture(gl.TEXTURE_2D, texture);
+      const tex = gl.createTexture()!;
+      gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, t.grid * 2, t.grid, 0, gl.RGBA, gl.UNSIGNED_BYTE, t.data);
-      spiralTextures.set(t, texture);
-    }
+      return tex;
+    });
     const t = table ?? emptyTable;
     const shape = (v.shape as LatticeShape) ?? "round";
     return {
@@ -158,4 +158,4 @@ ${GLSL_LATTICE_HT}
 });
 
 const emptyTable: SpiralBuckets = { count: 0, radius: 1, grid: 1, data: new Uint8Array(8).fill(255) };
-const spiralTextures = new WeakMap<SpiralBuckets, WebGLTexture>();
+const spiralTextures = new TextureCache<SpiralBuckets>();

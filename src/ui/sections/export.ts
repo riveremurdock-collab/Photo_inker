@@ -3,7 +3,7 @@
 
 import type { SourceStore } from "../../app/source";
 import type { SettingsStore } from "../../app/store";
-import { downloadBlob, ExportCancelled, exportImage, planExport } from "../../export/exporter";
+import { downloadBlob, ExportCancelled, exportImage, exportProblem, planExport } from "../../export/exporter";
 import type { Pipeline } from "../../pipeline/pipeline";
 
 export function createExportBlock(store: SettingsStore, source: SourceStore, pipeline: Pipeline): HTMLElement {
@@ -25,10 +25,13 @@ export function createExportBlock(store: SettingsStore, source: SourceStore, pip
   cancel.type = "button";
   cancel.textContent = "Cancel";
   progressRow.append(bar, cancel);
+  const warning = document.createElement("p");
+  warning.className = "export-warning";
+  warning.hidden = true;
   const message = document.createElement("p");
   message.className = "control-help export-message";
   message.setAttribute("aria-live", "polite");
-  element.append(summary, button, progressRow, message);
+  element.append(summary, warning, button, progressRow, message);
 
   let running = false;
   let cancelled = false;
@@ -44,11 +47,18 @@ export function createExportBlock(store: SettingsStore, source: SourceStore, pip
         ? `Export ${e.fileFormat.toUpperCase()} page`
         : "Export riso layers";
     button.disabled = running || !image;
+    warning.hidden = true;
     if (!image) {
       summary.textContent = "Upload an image to export.";
       return;
     }
     const plan = planExport(settings, image.width, image.height);
+    const problem = exportProblem(plan);
+    if (problem) {
+      warning.textContent = problem;
+      warning.hidden = false;
+      button.disabled = true;
+    }
     const size = `${plan.width} × ${plan.height} px`;
     const inches = `${(plan.width / (plan.dpi ?? 600)).toFixed(2)} × ${(plan.height / (plan.dpi ?? 600)).toFixed(2)} in`;
     if (plan.kind === "riso") {
@@ -75,7 +85,7 @@ export function createExportBlock(store: SettingsStore, source: SourceStore, pip
     try {
       const result = await exportImage(
         pipeline,
-        store.get(),
+        () => store.get(),
         source.get()?.fileName ?? "",
         (fraction, text) => {
           bar.value = fraction;

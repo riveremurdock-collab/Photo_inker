@@ -4,7 +4,7 @@
 // schema, so it stays in step with the panel.
 
 import type { OutputLayout } from "../app/layout";
-import { isSettingVisible } from "../schema/registry";
+import { isSettingVisible, slotDefault } from "../schema/registry";
 import { SECTIONS, type ProjectSettings } from "../schema/sections";
 import type { SectionSchema, SettingDef } from "../schema/types";
 
@@ -31,7 +31,10 @@ function formatValue(def: SettingDef, value: unknown, inkCount: number): string 
   return def.perInk ? (value as unknown[]).slice(0, inkCount).map(one).join(" / ") : one(value);
 }
 
-/** The visible settings of a section and its visible sub-sections, as "Label: value" lines. */
+/**
+ * The visible settings of a section and its visible sub-sections, as "Label: value" lines.
+ * Layers is a sub-section of Color Splitting but has its own column (describeLayers).
+ */
 function describe(settings: ProjectSettings, parentId: string): string[] {
   const values = settings as unknown as Record<string, Record<string, unknown>>;
   const n = settings.palette.inkCount;
@@ -44,7 +47,30 @@ function describe(settings: ProjectSettings, parentId: string): string[] {
   };
   for (const s of SECTIONS as readonly SectionSchema[]) {
     if (s.id === parentId) add(s);
-    else if (s.parent === parentId && (!s.visibleWhen || s.visibleWhen(values))) add(s);
+    else if (s.parent === parentId && s.id !== "layers" && (!s.visibleWhen || s.visibleWhen(values))) add(s);
+  }
+  return lines;
+}
+
+/**
+ * Layer options: the total ink limit, plus each per-ink option (edited in the
+ * Layers block, so hidden from generated controls) that any ink has changed.
+ * Solo and mute only affect the preview and are left out.
+ */
+function describeLayers(settings: ProjectSettings): string[] {
+  const section = (SECTIONS as readonly SectionSchema[]).find((s) => s.id === "layers")!;
+  const values = (settings as unknown as Record<string, Record<string, unknown>>).layers!;
+  const n = settings.palette.inkCount;
+  const lines: string[] = [];
+  for (const def of section.settings) {
+    if (def.stage === "mix") continue;
+    const value = values[def.key];
+    if (!def.perInk) {
+      lines.push(`${def.label}: ${formatValue(def, value, n)}`);
+      continue;
+    }
+    const slots = (value as unknown[]).slice(0, n);
+    if (slots.some((v, i) => JSON.stringify(v) !== JSON.stringify(slotDefault(def, i)))) lines.push(`${def.label}: ${formatValue(def, value, n)}`);
   }
   return lines;
 }
@@ -113,7 +139,7 @@ export async function printSheet(settings: ProjectSettings, layout: OutputLayout
   };
   column("Color splitting", describe(settings, "split"));
   column("Halftone", describe(settings, "halftone"));
-  column("Layers", describe(settings, "layers"));
+  column("Layers", describeLayers(settings));
   return canvas.convertToBlob({ type: "image/png" });
 }
 

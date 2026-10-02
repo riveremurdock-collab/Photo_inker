@@ -317,6 +317,13 @@ body[data-mode="print"] .mode-badge {
   line-height: 1;
 }
 
+/* An action in a notice (e.g. Reload) looks like the app's other buttons. */
+.notice button.notice-action {
+  padding: 4px 12px;
+  border: 1px solid var(--color-sage);
+  font-size: 13px;
+}
+
 /* ---- Panel ---- */
 
 .panel {
@@ -1053,6 +1060,12 @@ input.swatch-input {
 
 .export-message {
   min-height: 1em;
+}
+
+.export-warning {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-error);
 }
 
 /* Scheme mode: mark ink 1 as the color the others are generated from. */

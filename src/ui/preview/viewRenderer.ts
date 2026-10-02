@@ -100,8 +100,12 @@ export interface TextureSource {
 /** Something that draws the whole view itself (e.g. the halftone compositor). */
 export interface ProceduralSource {
   kind: "procedural";
-  /** "fast" while the user is zooming or panning, "full" once the view settles. */
-  draw(view: ViewTransform, canvasWidth: number, canvasHeight: number, quality: "fast" | "full"): void;
+  /**
+   * "fast" while the user is zooming or panning, "full" once the view settles.
+   * May draw only part of the view and return false; it is then called again
+   * on the next frame with restart = false to continue.
+   */
+  draw(view: ViewTransform, canvasWidth: number, canvasHeight: number, quality: "fast" | "full", restart: boolean): boolean;
 }
 
 export type DisplaySource = TextureSource | ProceduralSource;
@@ -162,7 +166,11 @@ export class ViewRenderer {
     this.source = source;
   }
 
-  render(view: ViewTransform, imageWidth: number, imageHeight: number, quality: "fast" | "full" = "full"): void {
+  /**
+   * Draws the view. Returns false if a procedural source left part of it for
+   * later: call again with restart = false on the next frame.
+   */
+  render(view: ViewTransform, imageWidth: number, imageHeight: number, quality: "fast" | "full" = "full", restart = true): boolean {
     const gl = this.gl;
     const { width, height } = this.canvas;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -172,12 +180,11 @@ export class ViewRenderer {
       const [r, g, b] = this.background.map(linearToSrgbChannel) as [number, number, number];
       gl.clearColor(r, g, b, 1);
       gl.clear(gl.COLOR_BUFFER_BIT);
-      return;
+      return true;
     }
 
     if (this.source.kind === "procedural") {
-      this.source.draw(view, width, height, quality);
-      return;
+      return this.source.draw(view, width, height, quality, restart);
     }
 
     // Crisp pixels only when zoomed past 200% of real image pixels, and only if
@@ -215,5 +222,6 @@ export class ViewRenderer {
       gl.uniform3f(this.uniforms.uFrameColor, ...this.frame!.color);
     }
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    return true;
   }
 }

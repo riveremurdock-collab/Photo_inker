@@ -10,6 +10,7 @@
 
 import { GLSL_FRAME, GLSL_ROUNDED_RECT } from "../app/border";
 import { glslPrintSim } from "../app/printSim";
+import { BAND_MS, bandRows, timedBand } from "../engine/gl/bands";
 import type { Gpu, Target, UniformValue } from "../engine/gl/gpu";
 import { GLSL_INKS } from "../engine/gl/inkShader";
 import { GLSL_LINEAR_TO_SRGB, GLSL_SRGB_TO_LINEAR } from "../engine/gl/program";
@@ -20,6 +21,11 @@ import type { ProceduralSource, ViewTransform } from "../ui/preview/viewRenderer
 const MAX_SAMPLES = 8;
 /** Samples per axis while zooming/panning. */
 const FAST_SAMPLES = 3;
+/**
+ * GPU time per animation frame before the rest of the view is left for the
+ * next frame (heavy halftones then fill in from the top, keeping the page responsive).
+ */
+const FRAME_MS = 2 * BAND_MS;
 
 function fragment(methodGlsl: string, simEffects: boolean): string {
   return /* glsl */ `#version 300 es
@@ -122,6 +128,8 @@ export class Compositor implements ProceduralSource {
   private shaders = new Map<string, string>();
   private frame: Record<string, UniformValue> = {};
   private sim: Record<string, UniformValue> = {};
+  /** Rows of the canvas drawn so far for the current view (from the top). */
+  private rowsDone = 0;
 
   constructor(private gpu: Gpu) {}
 
@@ -145,14 +153,21 @@ export class Compositor implements ProceduralSource {
     return quality === "fast" ? Math.min(full, FAST_SAMPLES) : full;
   }
 
-  draw(view: ViewTransform, canvasWidth: number, canvasHeight: number, quality: "fast" | "full"): void {
+  /**
+   * Draws the view top-down in bands (see engine/gl/bands.ts), for up to about
+   * FRAME_MS. Returns false if rows are left: call again with restart = false
+   * on the next frame to continue where it stopped.
+   */
+  draw(view: ViewTransform, canvasWidth: number, canvasHeight: number, quality: "fast" | "full", restart: boolean): boolean {
     const s = this.state;
-    if (!s) return;
+    if (!s) return true;
+    if (restart) this.rowsDone = 0;
     const simEffects = this.sim.uSimOn === 1;
     const key = `${s.method.id}|${simEffects}`;
     let shader = this.shaders.get(key);
     if (!shader) this.shaders.set(key, (shader = fragment(s.method.glsl, simEffects)));
-    this.gpu.draw(shader, null, canvasWidth, canvasHeight, {
+    const samples = Compositor.samplesFor(s.outputScale / view.scale, quality);
+    const uniforms: Record<string, UniformValue> = {
       ...s.inkUniforms,
       ...s.methodUniforms,
       uFrameCanvas: [0, 0, s.imageWidth, s.imageHeight],
@@ -166,9 +181,20 @@ export class Compositor implements ProceduralSource {
       uScale: view.scale,
       uImageSize: [s.imageWidth, s.imageHeight],
       uOutScale: s.outputScale,
-      uSamples: Compositor.samplesFor(s.outputScale / view.scale, quality),
+      uSamples: samples,
       uVisible: s.visible,
       uBackground: s.background,
-    });
+    };
+    const costKey = `preview|${key}|${samples}`;
+    const start = performance.now();
+    while (this.rowsDone < canvasHeight) {
+      if (this.rowsDone > 0 && performance.now() - start > FRAME_MS) return false;
+      const rows = bandRows(costKey, canvasWidth, canvasHeight - this.rowsDone);
+      // GL rows count from the bottom; bands go from the top of the canvas down.
+      const band = { y: canvasHeight - this.rowsDone - rows, height: rows };
+      timedBand(this.gpu, null, costKey, canvasWidth * rows, () => this.gpu.draw(shader, null, canvasWidth, canvasHeight, uniforms, band));
+      this.rowsDone += rows;
+    }
+    return true;
   }
 }

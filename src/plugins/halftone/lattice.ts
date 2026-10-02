@@ -167,13 +167,25 @@ export function measureThresholds(
 // ---- Textures shared by lattice methods ----
 
 const cache = new WeakMap<WebGL2RenderingContext, Map<string, WebGLTexture>>();
+/** Small tables, but a new one per setting change (e.g. every stipple tweak): keep the most recent. */
+const FLOAT_TEXTURE_LIMIT = 64;
 
 export function floatTexture(gpu: Gpu, key: string, width: number, height: number, data: Float32Array, channels: 1 | 4 = 1): WebGLTexture {
   const gl = gpu.gl;
   let m = cache.get(gl);
   if (!m) cache.set(gl, (m = new Map()));
   let tex = m.get(key);
-  if (tex) return tex;
+  if (tex) {
+    // Most recently used last, so the oldest is evicted first.
+    m.delete(key);
+    m.set(key, tex);
+    return tex;
+  }
+  for (const [oldKey, old] of m) {
+    if (m.size < FLOAT_TEXTURE_LIMIT) break;
+    gl.deleteTexture(old);
+    m.delete(oldKey);
+  }
   tex = gl.createTexture()!;
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);

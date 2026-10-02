@@ -6,6 +6,7 @@
 // this module uploads it as a 3D texture and a GPU pass looks up every pixel.
 // A quick 17³ draft is shown first, then the full 33³ table replaces it.
 
+import { TextureCache } from "../../engine/gl/textureCache";
 import { GLSL_LINEAR_TO_SRGB } from "../../engine/gl/program";
 import { defineSection } from "../../schema/types";
 import type { InkMatchRequest, InkMatchResult } from "../../workers/inkMatchTypes";
@@ -92,22 +93,21 @@ void main() {
 }
 `;
 
-const lutTextures = new WeakMap<InkMatchResult, { gl: WebGL2RenderingContext; texture: WebGLTexture }>();
+const lutTextures = new TextureCache<InkMatchResult>();
 
 function lutTexture(gl: WebGL2RenderingContext, lut: InkMatchResult): WebGLTexture {
-  const cached = lutTextures.get(lut);
-  if (cached && cached.gl === gl) return cached.texture;
-  const texture = gl.createTexture()!;
-  gl.bindTexture(gl.TEXTURE_3D, texture);
-  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
-  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-  gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGBA8, lut.size, lut.size, lut.size, 0, gl.RGBA, gl.UNSIGNED_BYTE, lut.lut);
-  lutTextures.set(lut, { gl, texture });
-  return texture;
+  return lutTextures.get(gl, lut, () => {
+    const texture = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_3D, texture);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGBA8, lut.size, lut.size, lut.size, 0, gl.RGBA, gl.UNSIGNED_BYTE, lut.lut);
+    return texture;
+  });
 }
 
 export const inkMatching = defineSplitMethod({

@@ -18,6 +18,7 @@
 
 import { zipSync } from "fflate";
 import { frameUniforms } from "../app/border";
+import { bandRows, timedBand } from "../engine/gl/bands";
 import { outputLayout, type OutputLayout, type Rect } from "../app/layout";
 import type { SimPurpose } from "../app/printSim";
 import type { Target, UniformValue } from "../engine/gl/gpu";
@@ -37,6 +38,17 @@ const MAX_JPG_PIXELS = 120_000_000;
 const MAX_JPG_EDGE = 16384;
 /** Resolution of the riso composite proof. */
 const PROOF_DPI = 150;
+/**
+ * Largest output: 32768 px per side keeps one strip of tiles (width × 2048 px,
+ * RGBA) within a few hundred MB; a billion pixels per file is still under a
+ * few minutes. A3 at 1200 DPI (14031 × 19843) fits easily.
+ */
+const MAX_OUTPUT_EDGE = 32768;
+const MAX_OUTPUT_PIXELS = 1_000_000_000;
+/** PDF pages larger than 200 in (14,400 pt) don't open in many readers. */
+const MAX_PDF_INCHES = 200;
+
+export const GPU_RESET_MESSAGE = "The graphics card stopped responding and was reset. Reload the page to continue.";
 
 export class ExportCancelled extends Error {
   constructor() {
@@ -78,6 +90,22 @@ export function planExport(settings: ProjectSettings, imageWidth: number, imageH
     format: print ? (e.fileFormat === "pdf" ? "pdf" : "png") : e.digitalFormat === "jpg" ? "jpg" : "png",
     inkCount: settings.palette.inkCount,
   };
+}
+
+/** Why this export can't be made (too large), or null if it can. */
+export function exportProblem(plan: ExportPlan): string | null {
+  const { width, height } = plan;
+  if (Math.max(width, height) > MAX_OUTPUT_EDGE || width * height > MAX_OUTPUT_PIXELS) {
+    const limit = plan.dpi ? ` (about ${(MAX_OUTPUT_EDGE / plan.dpi).toFixed(0)} in at ${plan.dpi} DPI)` : "";
+    return `Too large to export: ${width} × ${height} px. The limit is ${MAX_OUTPUT_EDGE} px per side${limit} and 1,000 megapixels. Use a smaller size or resolution.`;
+  }
+  if (plan.format === "pdf" && plan.dpi && Math.max(width, height) / plan.dpi > MAX_PDF_INCHES) {
+    return `PDF pages can be at most ${MAX_PDF_INCHES} in per side. Use PNG, or a smaller page.`;
+  }
+  if (plan.format === "jpg" && (width * height > MAX_JPG_PIXELS || Math.max(width, height) > MAX_JPG_EDGE)) {
+    return `JPG export is limited to ${MAX_JPG_EDGE} px per side and 120 megapixels. Use PNG for larger images.`;
+  }
+  return null;
 }
 
 /** Safe file name part from the project name. */
@@ -152,6 +180,8 @@ async function renderTiles(
   const simEffects = look.sim.uSimOn === 1;
   const shader = state.halftone ? halftoneExportShader(state.halftone.method.glsl, simEffects) : smoothExportShader(simEffects);
   const outsideBytes = look.outside.map((v) => Math.round(v * 255));
+  const costKey = `export|${state.halftone?.method.id ?? "smooth"}|${simEffects}|${mode}|${tp.samples}`;
+  let lastYield = performance.now();
 
   const targets = emptyRegionTargets();
   let output: Target | null = null;
@@ -190,7 +220,7 @@ async function renderTiles(
         const r = pipeline.renderRegion(region, texelScale, targets, { mix: mode === 0 && !state.halftone });
 
         output = gpu.ensureTarget(output, tw, th, "coverage");
-        gpu.pass(shader, output, {
+        const uniforms: Record<string, UniformValue> = {
           ...state.inkUniforms,
           ...(state.halftone?.methodUniforms ?? {}),
           ...frameUniforms(state.border),
@@ -208,7 +238,21 @@ async function renderTiles(
           uOutside: look.outside,
           uTransparent: look.transparent ? 1 : 0,
           uSize: [tw, th],
-        });
+        };
+        // In bands, so a heavy halftone (stipple, or the proof's many samples) never
+        // runs long enough on the GPU for the driver to reset (engine/gl/bands.ts).
+        for (let y = 0; y < th; ) {
+          if (isCancelled()) throw new ExportCancelled();
+          const band = { y, height: bandRows(costKey, tw, th - y) };
+          const target = output;
+          timedBand(gpu, target.framebuffer, costKey, tw * band.height, () => gpu.draw(shader, target.framebuffer, tw, th, uniforms, band));
+          y += band.height;
+          if (performance.now() - lastYield > 100) {
+            await nextFrame();
+            lastYield = performance.now();
+          }
+        }
+        if (gpu.gl.isContextLost()) throw new Error(GPU_RESET_MESSAGE);
         const pixels = gpu.read(output);
         for (let row = 0; row < th; row++) {
           strip.set(pixels.subarray(row * tw * 4, (row + 1) * tw * 4), (row * tp.width + x0) * 4);
@@ -302,22 +346,36 @@ async function waitUntilReady(pipeline: Pipeline, progress: ExportProgress, isCa
   return state;
 }
 
+/**
+ * Exports with the settings as they are once any pending work (e.g. Ink
+ * Matching) has finished. The pipeline is held for the whole export, so
+ * changes made meanwhile only reach the preview afterwards and never a
+ * half-written file.
+ */
 export async function exportImage(
   pipeline: Pipeline,
-  settings: ProjectSettings,
+  getSettings: () => ProjectSettings,
   imageName: string,
   progress: ExportProgress,
   isCancelled: () => boolean,
 ): Promise<ExportResult> {
   const ready = await waitUntilReady(pipeline, progress, isCancelled);
-  const plan = planExport(settings, ready.imageWidth, ready.imageHeight);
-  const { state, release } = await prepareExportBitmap(pipeline, ready, plan, progress, isCancelled);
+  pipeline.hold(true);
   try {
-    if (plan.kind === "digital") return await exportDigital(pipeline, state, plan, settings, progress, isCancelled);
-    if (plan.kind === "standard") return await exportStandard(pipeline, state, plan, settings, progress, isCancelled);
-    return await exportRiso(pipeline, state, plan, settings, imageName, progress, isCancelled);
+    const settings = getSettings();
+    const plan = planExport(settings, ready.imageWidth, ready.imageHeight);
+    const problem = exportProblem(plan);
+    if (problem) throw new Error(problem);
+    const { state, release } = await prepareExportBitmap(pipeline, ready, plan, progress, isCancelled);
+    try {
+      if (plan.kind === "digital") return await exportDigital(pipeline, state, plan, settings, progress, isCancelled);
+      if (plan.kind === "standard") return await exportStandard(pipeline, state, plan, settings, progress, isCancelled);
+      return await exportRiso(pipeline, state, plan, settings, imageName, progress, isCancelled);
+    } finally {
+      release();
+    }
   } finally {
-    release();
+    pipeline.hold(false);
   }
 }
 
@@ -352,9 +410,6 @@ async function exportDigital(
   const report = (f: number) => progress(f, "Rendering…");
 
   if (plan.format === "jpg") {
-    if (plan.width * plan.height > MAX_JPG_PIXELS || Math.max(plan.width, plan.height) > MAX_JPG_EDGE) {
-      throw new Error(`JPG export is limited to ${MAX_JPG_EDGE} px per side and 120 megapixels. Use PNG for larger images.`);
-    }
     const canvas = new OffscreenCanvas(plan.width, plan.height);
     const ctx = canvas.getContext("2d")!;
     await renderTiles(pipeline, state, tp, 0, look, (rgba, y, rows) => {

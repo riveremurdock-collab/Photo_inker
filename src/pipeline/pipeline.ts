@@ -69,6 +69,7 @@ export interface PipelineHost {
 
 export type HistogramListener = (histogram: Uint32Array, source: string) => void;
 export type BusyListener = (message: string | null) => void;
+export type ErrorListener = (message: string) => void;
 
 interface Prepared {
   key: string;
@@ -179,8 +180,12 @@ export class Pipeline {
   private halftoned = false;
 
   private frameRequested = false;
+  private held = false;
+  /** The image the stages last ran on (a new upload during an export must not change it). */
+  private imageSize = { width: 0, height: 0 };
   private histogramListeners = new Set<HistogramListener>();
   private busyListeners = new Set<BusyListener>();
+  private errorListeners = new Set<ErrorListener>();
   private busyMessages = new Map<string, string>();
   private lastHistogram: { data: Uint32Array; source: string } | null = null;
 
@@ -200,6 +205,18 @@ export class Pipeline {
   onBusy(listener: BusyListener): () => void {
     this.busyListeners.add(listener);
     return () => this.busyListeners.delete(listener);
+  }
+
+  /** Background work that failed (e.g. an Ink Matching table), as a message for the user. */
+  onError(listener: ErrorListener): () => void {
+    this.errorListeners.add(listener);
+    return () => this.errorListeners.delete(listener);
+  }
+
+  private reportError(what: string, err: unknown): void {
+    console.error(err);
+    const detail = err instanceof Error ? err.message : String(err);
+    for (const l of this.errorListeners) l(`${what} failed: ${detail}. Change a setting to try again.`);
   }
 
   /** Runs the pipeline on the next animation frame (several changes in one frame run once). */
@@ -227,9 +244,22 @@ export class Pipeline {
     return true;
   }
 
+  /**
+   * While held (during an export), the pipeline doesn't rerun, so everything
+   * the export reads stays as it was when the export started. Changes made
+   * meanwhile run when it is released.
+   */
+  hold(on: boolean): void {
+    this.held = on;
+    this.setBusy("export", on ? "Exporting (changes show when it's done)" : null);
+    if (!on) this.schedule();
+  }
+
   private run(): void {
+    if (this.held || this.gpu.gl.isContextLost()) return;
     const image = this.host.source.get();
     if (!image) return;
+    this.imageSize = { width: image.width, height: image.height };
     const settings = this.host.settings.get();
     this.log = [];
     const t0 = performance.now();
@@ -530,11 +560,11 @@ export class Pipeline {
       })
       .catch((err: unknown) => {
         if (err instanceof SupersededError) return;
-        console.error(err);
         if (this.preparing === pkey) {
           this.preparing = null;
           this.setBusy("split", null);
-        }
+          this.reportError("Ink matching", err);
+        } else console.error(err);
       });
   }
 
@@ -871,11 +901,12 @@ export class Pipeline {
         this.schedule();
       })
       .catch((err: unknown) => {
-        if (!(err instanceof SupersededError)) console.error(err);
+        if (err instanceof SupersededError) return;
         if (this.bitmapBuilding === key) {
           this.bitmapBuilding = null;
           this.setBusy("bitmap", null);
-        }
+          this.reportError("Dithering", err);
+        } else console.error(err);
       });
   }
 
@@ -903,11 +934,12 @@ export class Pipeline {
         this.schedule();
       })
       .catch((err: unknown) => {
-        if (!(err instanceof SupersededError)) console.error(err);
+        if (err instanceof SupersededError) return;
         if (this.halftonePreparing === pkey) {
           this.halftonePreparing = null;
           this.setBusy("halftone", null);
-        }
+          this.reportError("Building the halftone", err);
+        } else console.error(err);
       });
   }
 
@@ -932,14 +964,13 @@ export class Pipeline {
    * settles after zooming or panning.
    */
   renderDetail(): void {
-    const image = this.host.source.get();
     const inputs = this.inputs;
-    if (!image || !inputs || !this.working || !this.sourceTexture || this.halftoned) return;
+    if (this.held || !inputs || !this.working || !this.sourceTexture || this.halftoned) return;
 
     const view = this.host.preview.currentView;
     const canvas = this.host.preview.canvasSize;
-    const W = image.width;
-    const H = image.height;
+    const W = this.imageSize.width;
+    const H = this.imageSize.height;
     const workingScale = this.working.width / W;
     const sourceScale = this.sourceTextureWidth / W;
     // Only when zoomed in beyond the working copy, and more resolution exists.
@@ -989,10 +1020,9 @@ export class Pipeline {
     t: RegionTargets,
     options: { mix: boolean; visible?: number[] },
   ): { source: Target; layered: Target; mixed: Target | null } {
-    const image = this.host.source.get()!;
     const inputs = this.inputs!;
-    const W = image.width;
-    const H = image.height;
+    const W = this.imageSize.width;
+    const H = this.imageSize.height;
     const w = Math.max(1, Math.round(region.width * texelScale));
     const h = Math.max(1, Math.round(region.height * texelScale));
     t.source = this.gpu.ensureTarget(t.source, w, h, "image");
@@ -1023,13 +1053,14 @@ export class Pipeline {
 
   /** True while ink matching or a halftone map is still being prepared. */
   get busy(): boolean {
-    return this.busyMessages.size > 0 || this.preparing !== null || this.halftonePreparing !== null || this.bitmapBuilding !== null;
+    const working = [...this.busyMessages.keys()].some((id) => id !== "export");
+    return working || this.preparing !== null || this.halftonePreparing !== null || this.bitmapBuilding !== null;
   }
 
   /** What an export needs from the current state, or null if nothing is loaded yet. */
   exportState(): ExportState | null {
-    const image = this.host.source.get();
-    if (!image || !this.inputs || !this.sourceTexture) return null;
+    const image = this.imageSize;
+    if (!this.host.source.get() || !this.inputs || !this.sourceTexture) return null;
     return {
       gpu: this.gpu,
       imageWidth: image.width,
