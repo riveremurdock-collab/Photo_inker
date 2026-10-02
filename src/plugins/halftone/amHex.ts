@@ -19,7 +19,7 @@ export const amHexSection = defineSection({
   visibleWhen: (s) => s.halftone?.type === "hex",
   settings: [
     { kind: "number", key: "cellSize", label: "Cell size", perInk: true, default: 8, min: 2, max: 64, step: 0.5, unit: "px", help: "Same dot density as a square grid of this size, in output pixels." },
-    { kind: "number", key: "angle", label: "Angle", perInk: true, default: 30, slotDefaults: [0, 30, 15, 45], min: 0, max: 60, step: 0.5, unit: "°", help: "A hex grid repeats every 60°." },
+    { kind: "number", key: "angle", label: "Angle", perInk: true, linkInks: false, default: 30, slotDefaults: [0, 30, 15, 45], min: 0, max: 60, step: 0.5, unit: "°", help: "A hex grid repeats every 60°." },
     ...latticeDotSettings(),
   ],
 });

@@ -24,6 +24,7 @@ export const inkMatchingSection = defineSection({
     {
       kind: "number",
       key: "priority",
+      linkInks: false,
       label: "Ink priority",
       perInk: true,
       default: 50,

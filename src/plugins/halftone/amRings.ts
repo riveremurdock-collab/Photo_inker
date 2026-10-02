@@ -34,7 +34,7 @@ export const amRingsSection = defineSection({
       help: "As a share of the ring spacing.",
       visibleWhen: (s) => !s.lines,
     },
-    { kind: "number", key: "angle", label: "Dot rotation", perInk: true, default: 0, slotDefaults: [0, 15, 30, 45], min: 0, max: 360, step: 1, unit: "°", visibleWhen: (s) => !s.lines },
+    { kind: "number", key: "angle", label: "Dot rotation", perInk: true, linkInks: false, default: 0, slotDefaults: [0, 15, 30, 45], min: 0, max: 360, step: 1, unit: "°", visibleWhen: (s) => !s.lines },
     { kind: "number", key: "centerX", label: "Center, across", default: 50, min: 0, max: 100, step: 0.5, unit: "%" },
     { kind: "number", key: "centerY", label: "Center, down", default: 50, min: 0, max: 100, step: 0.5, unit: "%" },
     ...latticeDotSettings(),

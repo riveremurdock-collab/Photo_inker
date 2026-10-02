@@ -63,7 +63,10 @@ All app settings live in one typed **`ProjectSettings`** object held by `app/sto
 | `min`/`max`/`step`/`unit` or `options` | range or choices |
 | `perInk` | stored as an array indexed by ink slot (always length `MAX_INKS` = 4, so adding or removing inks never loses values) |
 | `stage` | overrides the section's stage; `null` = never affects the preview (export-only or UI-only) |
-| `visibleWhen` | shown only when a predicate over the section's values is true (e.g. JPG quality only for JPG) |
+| `visibleWhen` | shown only when a predicate over the section's values (and, as a second argument, the whole project's) is true (e.g. JPG quality only for JPG) |
+| `placement` | `"end"`: shown after the section's sub-sections (Halftone's minimum dot settings) |
+| `collapsed` | tucked into a collapsed row with this text (ink opacity) |
+| `linkInks` | per-ink numbers: whether the inks start linked ("Same for all inks", one slider for every ink). Default true; false for angles and priorities. Linking is a view choice, not a stored setting |
 | `display` | selects only: `segmented` buttons or `dropdown` |
 | `modes` | show only in `digital` or `print` mode |
 | `advanced` | hidden behind the section's Basic/Advanced toggle (Step 14) |
@@ -72,6 +75,7 @@ All app settings live in one typed **`ProjectSettings`** object held by `app/sto
 - **Derived type.** `ProjectSettings` is derived from the schema by TypeScript (literal keys and option values), so `settings.upload.mode` is typed `"digital" | "print"` without a hand-written interface.
 - **Plugin settings.** A splitting method or halftone type brings its own `schema`. The section shows the chosen plugin's controls, and its values are stored under `settings.split.methods[methodId]` / `settings.halftone.types[typeId]`, so switching methods keeps each method's settings.
 - **Inks.** Inks are per-ink settings in slots 0..`inkCount`-1, and slot order is print order. `SettingsStore.permuteInks(order)` reorders every per-ink setting in every section at once, so an ink's settings travel with it.
+- **Select groups.** An option's `group` puts it under a heading in the dropdown (the halftone types: AM, then FM).
 - **Generated UI.** Controls are generated from the schema. Sections with special UI (palette list, histogram band handles, curve editors) add a custom builder, but their values still live in the settings object and are still described by `SettingDef`s.
 - **Walking the schema.** Presets, save/load, and randomize (later) only walk the schema.
   - Defaults: `defaultsFor(schema)`.

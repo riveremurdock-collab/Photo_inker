@@ -17,6 +17,7 @@ const COMING_IN: Partial<Record<SectionId, string>> = {};
 interface BoundControl {
   sectionId: string;
   def: SettingDef;
+  /** The row (or the collapsible wrapper around it) that is hidden when the setting is. */
   element: HTMLElement;
   update(settings: ProjectSettings): void;
 }
@@ -30,6 +31,8 @@ export class Panel {
   readonly element: HTMLElement;
   private controls: BoundControl[] = [];
   private subSections: SubSection[] = [];
+  /** Controls placed at the end of their section, after its sub-sections (SettingDef.placement). */
+  private atEnd: { container: HTMLElement; element: HTMLElement }[] = [];
 
   constructor(
     private store: SettingsStore,
@@ -98,6 +101,18 @@ export class Panel {
 
       this.element.append(details);
     }
+    // End-placed controls go in one block per section, set apart from the sub-sections above.
+    const endBlocks = new Map<HTMLElement, HTMLElement>();
+    for (const { container, element } of this.atEnd) {
+      let block = endBlocks.get(container);
+      if (!block) {
+        block = document.createElement("div");
+        block.className = "panel-end";
+        container.append(block);
+        endBlocks.set(container, block);
+      }
+      block.append(element);
+    }
 
     this.refresh();
     store.subscribe(() => this.refresh());
@@ -107,7 +122,9 @@ export class Panel {
     for (const def of section.settings) {
       if (def.hidden) continue;
       const bound = def.perInk ? this.perInkControl(section.id, def) : this.scalarControl(section.id, def);
-      container.append(bound.element);
+      if (def.collapsed) bound.element = collapsible(def.collapsed, bound.element);
+      if (def.placement === "end") this.atEnd.push({ container, element: bound.element });
+      else container.append(bound.element);
       this.controls.push(bound);
     }
   }
@@ -152,16 +169,24 @@ export class Panel {
     };
   }
 
-  /** A labelled group with one control per active ink, rebuilt when the inks change. */
+  /**
+   * A labelled group with one control per active ink, rebuilt when the inks
+   * change. Per-ink numbers can be linked ("Same for all inks"): one slider
+   * then sets every ink. Linking is a view choice, not a setting: it starts
+   * from SettingDef.linkInks, but only when the inks already share a value.
+   */
   private perInkControl(sectionId: string, def: SettingDef): BoundControl {
     const element = document.createElement("div");
     element.className = "control-group";
+    const head = document.createElement("div");
+    head.className = "control-group-head";
     const label = document.createElement("span");
     label.className = "control-label";
     label.textContent = def.label;
+    head.append(label);
     const rows = document.createElement("div");
     rows.className = "control-group-rows";
-    element.append(label, rows);
+    element.append(head, rows);
     if (def.help) {
       const help = document.createElement("p");
       help.className = "control-help";
@@ -169,9 +194,37 @@ export class Panel {
       element.append(help);
     }
 
+    const store = this.store;
+    const linkable = def.kind === "number";
+    let linked: boolean | null = null;
+    const linkBox = document.createElement("input");
+    if (linkable) {
+      const linkLabel = document.createElement("label");
+      linkLabel.className = "control-link";
+      linkBox.type = "checkbox";
+      linkLabel.append(linkBox, "Same for all inks");
+      head.append(linkLabel);
+      linkBox.addEventListener("change", () => {
+        linked = linkBox.checked;
+        // Linking gives every ink the first ink's value.
+        if (linked) setAll((store.getValue(sectionId, def.key) as unknown[])[0], true);
+        else this.refresh();
+      });
+    }
+    const setAll = (value: unknown, commit: boolean) => {
+      const n = store.get().palette.inkCount;
+      const values = store.getValue(sectionId, def.key) as unknown[];
+      store.setValue(sectionId, def.key, values.map((v, i) => (i < n ? value : v)), { commit });
+    };
+    const dot = (color: string) => {
+      const d = document.createElement("span");
+      d.className = "ink-dot";
+      d.style.setProperty("--swatch", color);
+      return d;
+    };
+
     let signature = "";
     let controls: Control[] = [];
-    const store = this.store;
 
     return {
       sectionId,
@@ -179,12 +232,31 @@ export class Panel {
       element,
       update(settings) {
         const { inkCount, inkColor } = settings.palette;
-        const nextSignature = `${inkCount}|${inkColor.join("|")}`;
         const values = store.getValue(sectionId, def.key) as unknown[];
+        const active = values.slice(0, inkCount);
+        const allSame = active.every((v) => v === active[0]);
+        linked ??= def.linkInks !== false && allSame;
+        const showLinked = linkable && linked && inkCount > 1;
+        if (linkable) {
+          linkBox.checked = showLinked;
+          linkBox.parentElement!.hidden = inkCount < 2;
+        }
+        // A linked group whose inks drifted apart (e.g. an ink was just added): bring them back together.
+        if (showLinked && !allSame) queueMicrotask(() => setAll(values[0], true));
+
+        const nextSignature = `${inkCount}|${inkColor.join("|")}|${showLinked}`;
         if (nextSignature !== signature) {
           signature = nextSignature;
           rows.innerHTML = "";
           controls = [];
+          if (showLinked) {
+            const control = createControl({ ...def, help: undefined }, values[0], (value, commit) => setAll(value, commit), "All inks");
+            const labelEl = control.element.querySelector(".control-label");
+            for (let slot = inkCount - 1; slot >= 0; slot--) labelEl?.prepend(dot(inkColor[slot] ?? "#000"));
+            rows.append(control.element);
+            controls.push(control);
+            return;
+          }
           for (let slot = 0; slot < inkCount; slot++) {
             const control = createControl(
               { ...def, help: undefined },
@@ -192,11 +264,7 @@ export class Panel {
               (value, commit) => store.setInkValue(sectionId, def.key, slot, value, { commit }),
               (inkColor[slot] ?? "").toUpperCase(),
             );
-            const labelEl = control.element.querySelector(".control-label");
-            const dot = document.createElement("span");
-            dot.className = "ink-dot";
-            dot.style.setProperty("--swatch", inkColor[slot] ?? "#000");
-            labelEl?.prepend(dot);
+            control.element.querySelector(".control-label")?.prepend(dot(inkColor[slot] ?? "#000"));
             rows.append(control.element);
             controls.push(control);
           }
@@ -218,4 +286,14 @@ export class Panel {
       bound.element.hidden = !isSettingVisible(bound.def, settings, bound.sectionId);
     }
   }
+}
+
+/** Wraps a control in a collapsed row (SettingDef.collapsed). */
+function collapsible(summaryText: string, content: HTMLElement): HTMLElement {
+  const details = document.createElement("details");
+  details.className = "control-more";
+  const summary = document.createElement("summary");
+  summary.textContent = summaryText;
+  details.append(summary, content);
+  return details;
 }

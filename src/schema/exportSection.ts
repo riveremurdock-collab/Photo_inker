@@ -10,24 +10,15 @@ import { defineSection } from "./types";
 const inDigital = ["digital"] as const;
 const inPrint = ["print"] as const;
 
+const MARGIN_HELP = "Riso machines can't print within about 5 mm (0.2 in) of the paper edge; shown as a dashed guide in the preview.";
+const BLEED_HELP = "Extra paper around the page for artwork that runs off the edge; the file grows by this much on each side.";
+
 export const exportSection = defineSection({
   id: "export",
   title: "Export",
   stage: null,
   settings: [
     // ---- Digital ----
-    {
-      kind: "select",
-      key: "digitalFormat",
-      label: "Format",
-      default: "png",
-      display: "segmented",
-      modes: inDigital,
-      options: [
-        { value: "png", label: "PNG" },
-        { value: "jpg", label: "JPG" },
-      ],
-    },
     {
       kind: "select",
       key: "digitalSize",
@@ -69,10 +60,23 @@ export const exportSection = defineSection({
       modes: inDigital,
       stage: "halftone",
       options: [
-        { value: "fit", label: "Fit (show all)" },
-        { value: "fill", label: "Fill (crop)" },
+        { value: "fit", label: "Fit" },
+        { value: "fill", label: "Fill" },
       ],
+      help: "Fit: the whole image shows, with paper around it. Fill: covers the whole size, cropping the image.",
       visibleWhen: (e) => e.digitalSize === "custom" && e.lockAspect === false,
+    },
+    {
+      kind: "select",
+      key: "digitalFormat",
+      label: "File format",
+      default: "png",
+      display: "segmented",
+      modes: inDigital,
+      options: [
+        { value: "png", label: "PNG" },
+        { value: "jpg", label: "JPG" },
+      ],
     },
     { kind: "number", key: "jpgQuality", label: "JPG quality", default: 92, min: 40, max: 100, step: 1, unit: "%", modes: inDigital, visibleWhen: (e) => e.digitalFormat === "jpg" },
     {
@@ -85,7 +89,7 @@ export const exportSection = defineSection({
       visibleWhen: (e) => e.digitalFormat === "png",
     },
 
-    // ---- Print ----
+    // ---- Print: printer, then the page, then the file, then marks and extras ----
     {
       kind: "select",
       key: "printTarget",
@@ -130,8 +134,7 @@ export const exportSection = defineSection({
         { value: "in", label: "in" },
         { value: "mm", label: "mm" },
       ],
-      help: "For the custom page size and image width. Margins and bleed are always in mm.",
-      visibleWhen: (e) => e.pageSize === "custom" || e.pageSize === "image" || e.placement === "custom",
+      help: "For margins, bleed, image width and custom page sizes. Switching converts them.",
     },
     { kind: "number", key: "pageWidth", label: "Page width", default: 8.5, min: 1, max: 1000, step: 0.01, modes: inPrint, stage: "halftone", visibleWhen: (e) => e.pageSize === "custom" },
     { kind: "number", key: "pageHeight", label: "Page height", default: 11, min: 1, max: 1000, step: 0.01, modes: inPrint, stage: "halftone", visibleWhen: (e) => e.pageSize === "custom" },
@@ -148,19 +151,6 @@ export const exportSection = defineSection({
         { value: "landscape", label: "Landscape" },
       ],
       visibleWhen: (e) => e.pageSize !== "image",
-    },
-    {
-      kind: "number",
-      key: "dpi",
-      label: "Resolution",
-      stage: "halftone",
-      default: 600,
-      min: 150,
-      max: 1200,
-      step: 50,
-      unit: "DPI",
-      modes: inPrint,
-      help: "Riso machines print at 600 DPI.",
     },
     {
       kind: "select",
@@ -193,6 +183,8 @@ export const exportSection = defineSection({
     },
     { kind: "number", key: "positionX", label: "Position across", default: 50, min: 0, max: 100, step: 0.5, unit: "%", modes: inPrint, stage: "halftone", visibleWhen: (e) => e.pageSize !== "image" && e.placement === "custom" },
     { kind: "number", key: "positionY", label: "Position down", default: 50, min: 0, max: 100, step: 0.5, unit: "%", modes: inPrint, stage: "halftone", visibleWhen: (e) => e.pageSize !== "image" && e.placement === "custom" },
+    // Margins and bleed are stored once per unit (each with a range that suits
+    // it); switching Units converts between them (ui/sections/export.ts).
     {
       kind: "number",
       key: "margin",
@@ -204,8 +196,22 @@ export const exportSection = defineSection({
       unit: "mm",
       modes: inPrint,
       stage: "halftone",
-      help: "Riso machines can't print within about 5 mm of the paper edge; shown as a dashed guide in the preview.",
-      visibleWhen: (e) => e.pageSize !== "image",
+      help: MARGIN_HELP,
+      visibleWhen: (e) => e.pageSize !== "image" && e.units === "mm",
+    },
+    {
+      kind: "number",
+      key: "marginIn",
+      label: "Margins",
+      default: 0.2,
+      min: 0,
+      max: 2,
+      step: 0.01,
+      unit: "in",
+      modes: inPrint,
+      stage: "halftone",
+      help: MARGIN_HELP,
+      visibleWhen: (e) => e.pageSize !== "image" && e.units !== "mm",
     },
     {
       kind: "number",
@@ -218,12 +224,52 @@ export const exportSection = defineSection({
       unit: "mm",
       modes: inPrint,
       stage: "halftone",
-      help: "Extra paper around the page for artwork that runs off the edge; the file grows by this much on each side.",
-      visibleWhen: (e) => e.pageSize !== "image",
+      help: BLEED_HELP,
+      visibleWhen: (e) => e.pageSize !== "image" && e.units === "mm",
     },
-    { kind: "toggle", key: "cropMarks", label: "Crop marks", default: false, modes: inPrint, stage: null, help: "Where to trim, at the artwork's corners (the page's with Fill)." },
-    { kind: "toggle", key: "regMarks", label: "Registration marks", default: false, modes: inPrint, stage: null, help: "Targets on every layer for lining the inks up.", visibleWhen: (e) => e.printTarget === "riso" },
-    { kind: "toggle", key: "layerLabels", label: "Layer labels", default: false, modes: inPrint, stage: null, help: "Project name, ink and print order in the bottom margin of each layer.", visibleWhen: (e) => e.printTarget === "riso" },
+    {
+      kind: "number",
+      key: "bleedIn",
+      label: "Bleed",
+      default: 0,
+      min: 0,
+      max: 0.4,
+      step: 0.01,
+      unit: "in",
+      modes: inPrint,
+      stage: "halftone",
+      help: BLEED_HELP,
+      visibleWhen: (e) => e.pageSize !== "image" && e.units !== "mm",
+    },
+    {
+      kind: "select",
+      key: "dpiPreset",
+      label: "Resolution",
+      default: "600",
+      display: "segmented",
+      modes: inPrint,
+      stage: "halftone",
+      options: [
+        { value: "300", label: "300 DPI" },
+        { value: "600", label: "600 DPI" },
+        { value: "1200", label: "1200 DPI" },
+        { value: "custom", label: "Custom" },
+      ],
+      help: "Riso machines print at 600 DPI.",
+    },
+    {
+      kind: "number",
+      key: "dpi",
+      label: "Custom resolution",
+      stage: "halftone",
+      default: 600,
+      min: 150,
+      max: 1200,
+      step: 50,
+      unit: "DPI",
+      modes: inPrint,
+      visibleWhen: (e) => e.dpiPreset === "custom",
+    },
     {
       kind: "select",
       key: "fileFormat",
@@ -238,6 +284,9 @@ export const exportSection = defineSection({
       ],
       help: "Riso PDF: one page per layer.",
     },
+    { kind: "toggle", key: "cropMarks", label: "Crop marks", default: false, modes: inPrint, stage: null, help: "Where to trim, at the artwork's corners (the page's with Fill)." },
+    { kind: "toggle", key: "regMarks", label: "Registration marks", default: false, modes: inPrint, stage: null, help: "Targets on every layer for lining the inks up.", visibleWhen: (e) => e.printTarget === "riso" },
+    { kind: "toggle", key: "layerLabels", label: "Layer labels", default: false, modes: inPrint, stage: null, help: "Project name, ink and print order in the bottom margin of each layer.", visibleWhen: (e) => e.printTarget === "riso" },
     { kind: "toggle", key: "includeProof", label: "Composite proof", default: true, modes: inPrint, stage: null, help: "A color preview of the whole page (150 DPI), added to the zip.", visibleWhen: (e) => e.printTarget === "riso" },
     { kind: "toggle", key: "includeSheet", label: "Print sheet", default: true, modes: inPrint, stage: null, help: "A page listing the inks, print order and settings, added to the zip.", visibleWhen: (e) => e.printTarget === "riso" },
     {
@@ -250,6 +299,30 @@ export const exportSection = defineSection({
       help: "Shrinks dots in the riso layers so they print at the intended size after the ink spreads. Uses the Dot gain settings in Print Simulation.",
       visibleWhen: (e) => e.printTarget === "riso",
     },
-    { kind: "toggle", key: "embedProfile", label: "Embed sRGB profile", default: true, stage: null, help: "Tags color files as sRGB so other apps show the colors as intended." },
+
+    // ---- Both modes ----
+    {
+      kind: "toggle",
+      key: "embedProfile",
+      label: "Embed sRGB profile",
+      default: true,
+      stage: null,
+      help: "Tags color files as sRGB so other apps show the colors as intended.",
+      // Riso layers are grayscale: only the color proof would carry it.
+      visibleWhen: (e, s) => s.upload?.mode !== "print" || e.printTarget === "standard" || e.includeProof === true,
+    },
   ],
 });
+
+/** The resolution in DPI (a preset, or the custom value). */
+export function exportDpi(e: { dpiPreset: string; dpi: number }): number {
+  return e.dpiPreset === "custom" ? e.dpi : Number(e.dpiPreset);
+}
+
+/** Margins and bleed in mm, from whichever unit is in use. */
+export function exportMarginMm(e: { units: string; margin: number; marginIn: number }): number {
+  return e.units === "mm" ? e.margin : e.marginIn * 25.4;
+}
+export function exportBleedMm(e: { units: string; bleed: number; bleedIn: number }): number {
+  return e.units === "mm" ? e.bleed : e.bleedIn * 25.4;
+}

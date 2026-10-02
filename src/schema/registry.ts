@@ -84,8 +84,8 @@ export function coerceValue(def: SettingDef, value: unknown): unknown {
 export function isSettingVisible(def: SettingDef, settings: ProjectSettings, sectionId: string): boolean {
   if (def.modes && !def.modes.includes(settings.upload.mode)) return false;
   if (def.visibleWhen) {
-    const section = (settings as Record<string, Record<string, unknown>>)[sectionId] ?? {};
-    return def.visibleWhen(section);
+    const all = settings as unknown as Record<string, Record<string, unknown>>;
+    return def.visibleWhen(all[sectionId] ?? {}, all);
   }
   return true;
 }

@@ -30,9 +30,25 @@ interface SettingBase<T> {
    * section's stage; null means it never affects the preview (export-only or UI-only).
    */
   readonly stage?: StageId | null;
-  /** Shown only when this returns true for the section's current values. */
-  readonly visibleWhen?: (section: Record<string, unknown>) => boolean;
+  /**
+   * Shown only when this returns true for the section's current values (and,
+   * when it needs them, the whole project's).
+   */
+  readonly visibleWhen?: (section: Record<string, unknown>, settings: Record<string, Record<string, unknown>>) => boolean;
   readonly help?: string;
+  /**
+   * Shown at the end of the section, after its sub-sections (e.g. Halftone's
+   * shared minimum dot settings come after the chosen type's settings).
+   */
+  readonly placement?: "end";
+  /** Tucked inside a collapsed row with this text, for settings most people leave alone. */
+  readonly collapsed?: string;
+  /**
+   * Per-ink numbers only: whether the inks start linked (one slider sets every
+   * ink). Defaults to true; settings usually set differently per ink (angles,
+   * priorities) use false.
+   */
+  readonly linkInks?: boolean;
 }
 
 export interface NumberSetting extends SettingBase<number> {
@@ -45,7 +61,8 @@ export interface NumberSetting extends SettingBase<number> {
 
 export interface SelectSetting extends SettingBase<string> {
   readonly kind: "select";
-  readonly options: readonly { readonly value: string; readonly label: string }[];
+  /** `group` puts options under a heading in the dropdown (consecutive options share one). */
+  readonly options: readonly { readonly value: string; readonly label: string; readonly group?: string }[];
   /** Segmented buttons suit 2–4 short options; dropdown is the default. */
   readonly display?: "dropdown" | "segmented";
   /**

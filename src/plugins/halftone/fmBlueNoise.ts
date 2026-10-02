@@ -42,8 +42,8 @@ export const fmBlueNoiseSection = defineSection({
         { value: "square", label: "Square" },
       ],
     },
-    { kind: "number", key: "minDensity", label: "Minimum density", default: 0, min: 0, max: 100, step: 1, unit: "%" },
-    { kind: "number", key: "maxDensity", label: "Maximum density", default: 100, min: 0, max: 100, step: 1, unit: "%" },
+    { kind: "number", key: "minDensity", label: "Dot density in light areas", default: 0, min: 0, max: 100, step: 1, unit: "%", help: "Share of dots placed where the tone is lightest." },
+    { kind: "number", key: "maxDensity", label: "Dot density in dark areas", default: 100, min: 0, max: 100, step: 1, unit: "%", help: "Share of dots placed where the tone is darkest." },
     {
       kind: "select",
       key: "mapSize",

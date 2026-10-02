@@ -312,6 +312,16 @@
 - **Checked:** all 180 combinations of mode × simulation × split method × halftone type with no errors; every export format; the production build under the site's CSP (`kawa_website/public/_headers`).
 - **Website, left for later:** the site's CSP has no `blob:` in `img-src`, which the fallback image loader for older browsers needs; `npm run build:site` and an embed page are not done yet.
 
+### Settings and panel review (2026-10-02)
+- **Fixed:** "Tones lighter than the minimum" now shows for every AM grid (hex, noise, spiral and rings used it but only the square grid showed it).
+- **Print Simulation:** the effect sub-sections only show while Simulate printing is on. Dot gain also shows when dot gain compensation is on (riso export), without its On switch and edge roughness, which only affect the preview. Effect switches are labelled "On"; Specks' per-ink switch is "Specks on these inks".
+- **Duplicates:** print order is set only in Palette (the Layers arrows are gone); FM blue noise's densities are "Dot density in light areas / dark areas"; the solid/paper border's radius is "Border corner radius"; Fit/Fill read the same in both modes.
+- **Order:** Export is Size → File format → format options in Digital, and Printer → page (size, units, orientation, placement, margins, bleed) → Resolution → File format → marks → extras → compensation in Print, with the sRGB profile last. Halftone shows the chosen type's settings first and the shared minimum dot settings after them. Halftone types are grouped AM / FM in the outline's order. Dot shape lists Round first everywhere. The hex grid has angle presets (0/30/15/45, all 30°, all 0°).
+- **Friendlier:** per-ink numbers have "Same for all inks" (linked by default except angles and ink priority); checkboxes sit beside their labels; Layers buttons read Invert / Knockout / Solo / Mute and the "Levels, curve, trapping" row no longer picks up the section heading style; ink opacity is in a collapsed row.
+- **Units:** margins and bleed follow Units (stored as `margin`/`bleed` in mm and `marginIn`/`bleedIn` in inches, each with its own range); switching Units converts margins, bleed, page size and image width, so the page stays the same.
+- **Resolution:** 300 / 600 / 1200 DPI buttons plus Custom (`dpiPreset`, `dpi`); `exportDpi()` gives the value.
+- **sRGB profile:** hidden for riso layers unless the color proof (the only color file) is included.
+
 ## Open questions
 
 - None right now.

@@ -11,6 +11,7 @@
 //   position. "Image only" makes the page exactly the artwork.
 
 import type { ProjectSettings } from "../schema/sections";
+import { exportBleedMm, exportDpi, exportMarginMm } from "../schema/exportSection";
 import { borderGeometry } from "./border";
 
 export const PAGE_SIZES_MM: Record<string, readonly [number, number]> = {
@@ -88,7 +89,7 @@ export function outputLayout(settings: ProjectSettings, imageWidth: number, imag
     return place(w, h, { x: 0, y: 0, width: A * s, height: B * s }, s, {}, "digital", null);
   }
 
-  const dpi = e.dpi;
+  const dpi = exportDpi(e);
   const toPx = (value: number, unit: "in" | "mm") => (unit === "in" ? value : value / MM_PER_IN) * dpi;
   const units = e.units === "mm" ? "mm" : "in";
 
@@ -110,11 +111,11 @@ export function outputLayout(settings: ProjectSettings, imageWidth: number, imag
     ph = toPx(b, "mm");
   }
   if ((e.orientation === "landscape") !== pw > ph) [pw, ph] = [ph, pw];
-  const bleed = toPx(e.bleed, "mm");
+  const bleed = toPx(exportBleedMm(e), "mm");
   const width = Math.max(1, Math.round(pw + 2 * bleed));
   const height = Math.max(1, Math.round(ph + 2 * bleed));
   const trim: Rect = { x: bleed, y: bleed, width: pw, height: ph };
-  const m = Math.min(toPx(e.margin, "mm"), pw / 2 - 1, ph / 2 - 1);
+  const m = Math.min(toPx(exportMarginMm(e), "mm"), pw / 2 - 1, ph / 2 - 1);
   const printable: Rect = { x: trim.x + m, y: trim.y + m, width: pw - 2 * m, height: ph - 2 * m };
 
   let s: number;

@@ -14,7 +14,7 @@ import { InkTestView } from "./ui/inkTestView";
 import { Pipeline } from "./pipeline/pipeline";
 import { createLayersBlock } from "./ui/sections/layers";
 import { createToneMapBlock } from "./ui/sections/toneMap";
-import { createAmBlock } from "./ui/sections/halftone";
+import { createAmBlock, createHexBlock } from "./ui/sections/halftone";
 import { createExportBlock } from "./ui/sections/export";
 import { createChannelSplitBlock } from "./ui/sections/channelSplit";
 import { createSelectiveColorBlock } from "./ui/sections/selectiveColor";
@@ -183,8 +183,9 @@ function start(root: HTMLElement): void {
     upload: uploadBlock.element,
     palette: paletteBlock,
     splitToneMap: createToneMapBlock(settings, pipeline),
-    layers: createLayersBlock(settings, palette),
+    layers: createLayersBlock(settings),
     halftoneAm: createAmBlock(settings),
+    halftoneHex: createHexBlock(settings),
     splitChannel: createChannelSplitBlock(settings),
     splitSelective: createSelectiveColorBlock(settings, source, eyedropper),
   }, {

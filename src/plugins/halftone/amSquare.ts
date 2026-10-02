@@ -40,6 +40,7 @@ export const amSquareSection = defineSection({
     {
       kind: "number",
       key: "angle",
+      linkInks: false,
       label: "Angle",
       perInk: true,
       default: 45,

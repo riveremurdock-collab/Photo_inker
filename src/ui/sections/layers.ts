@@ -3,7 +3,6 @@
 // to change print order, and a collapsible area for levels, curve, and
 // choke/spread (trapping).
 
-import type { PaletteActions } from "../../app/palette";
 import type { SettingsStore } from "../../app/store";
 import { findSetting } from "../../schema/registry";
 import type { SettingDef } from "../../schema/types";
@@ -41,12 +40,12 @@ function toggleButton(text: string, title: string): HTMLButtonElement {
   return b;
 }
 
-export function createLayersBlock(store: SettingsStore, actions: PaletteActions): HTMLElement {
+export function createLayersBlock(store: SettingsStore): HTMLElement {
   const element = document.createElement("div");
   element.className = "layers-block";
   const note = document.createElement("p");
   note.className = "control-help";
-  note.textContent = "Top prints first. Solo and mute only affect the preview.";
+  note.textContent = "In print order, which is set in Palette (top prints first). Solo and mute only change the preview.";
   const list = document.createElement("ol");
   list.className = "layer-list";
   element.append(note, list);
@@ -79,36 +78,19 @@ export function createLayersBlock(store: SettingsStore, actions: PaletteActions)
       invert.addEventListener("click", () =>
         store.setInkValue("layers", "invert", slot, !store.get().layers.invert[slot]),
       );
-      const solo = toggleButton("S", `Solo layer ${slot + 1} (preview only)`);
+      const solo = toggleButton("Solo", `Solo layer ${slot + 1}: show only soloed layers (preview only)`);
       solo.addEventListener("click", () => store.setInkValue("layers", "solo", slot, !store.get().layers.solo[slot]));
-      const mute = toggleButton("M", `Mute layer ${slot + 1} (preview only)`);
-      const knockout = toggleButton("KO", `Knockout: layer ${slot + 1} clears the layers printed before it where it has ink`);
+      const mute = toggleButton("Mute", `Mute layer ${slot + 1}: hide it (preview only)`);
+      const knockout = toggleButton("Knockout", `Knockout: layer ${slot + 1} clears the layers printed before it where it has ink`);
       knockout.addEventListener("click", () =>
         store.setInkValue("layers", "knockout", slot, !store.get().layers.knockout[slot]),
       );
       mute.addEventListener("click", () => store.setInkValue("layers", "mute", slot, !store.get().layers.mute[slot]));
 
-      const move = document.createElement("span");
-      move.className = "ink-move";
-      const up = document.createElement("button");
-      up.type = "button";
-      up.className = "icon-button";
-      up.textContent = "▲";
-      up.title = `Print layer ${slot + 1} earlier`;
-      up.setAttribute("aria-label", up.title);
-      up.disabled = slot === 0;
-      up.addEventListener("click", () => actions.moveInk(slot, -1));
-      const down = document.createElement("button");
-      down.type = "button";
-      down.className = "icon-button";
-      down.textContent = "▼";
-      down.title = `Print layer ${slot + 1} later`;
-      down.setAttribute("aria-label", down.title);
-      down.disabled = slot === p.inkCount - 1;
-      down.addEventListener("click", () => actions.moveInk(slot, 1));
-      move.append(up, down);
-
-      head.append(order, name, invert, knockout, solo, mute, move);
+      head.append(order, name);
+      const toggles = document.createElement("div");
+      toggles.className = "layer-toggles";
+      toggles.append(invert, knockout, solo, mute);
 
       const densityRow = document.createElement("label");
       densityRow.className = "layer-density";
@@ -159,7 +141,7 @@ export function createLayersBlock(store: SettingsStore, actions: PaletteActions)
       trapHelp.textContent = "In output pixels. Spread a lower layer (or choke a knockout layer) so small registration shifts don't leave paper gaps.";
       details.append(trapHelp);
 
-      li.append(head, densityRow, details);
+      li.append(head, toggles, densityRow, details);
       list.append(li);
       rows.push({ element: li, density, densityNumber, invert, knockout, solo, mute, more });
     }

@@ -110,6 +110,26 @@ export function createExportBlock(store: SettingsStore, source: SourceStore, pip
     message.textContent = "Cancelling…";
   });
 
+  // Switching units converts every length, so the page stays the same size.
+  let units = store.get().export.units;
+  store.subscribe((settings, change) => {
+    const e = settings.export;
+    if (change.section !== "export" || change.key !== "units" || e.units === units) return;
+    units = e.units;
+    const toMm = e.units === "mm";
+    const convert = (v: number, step: number) => Number((Math.round((toMm ? v * 25.4 : v / 25.4) / step) * step).toFixed(2));
+    if (toMm) {
+      store.set("export", "margin", convert(e.marginIn, 0.5));
+      store.set("export", "bleed", convert(e.bleedIn, 0.5));
+    } else {
+      store.set("export", "marginIn", convert(e.margin, 0.01));
+      store.set("export", "bleedIn", convert(e.bleed, 0.01));
+    }
+    store.set("export", "pageWidth", convert(e.pageWidth, 0.01));
+    store.set("export", "pageHeight", convert(e.pageHeight, 0.01));
+    store.set("export", "imageWidth", convert(e.imageWidth, 0.01));
+  });
+
   refresh();
   store.subscribe(refresh);
   source.subscribe(refresh);

@@ -8,6 +8,7 @@
 // The same geometry drives the preview's page overlay (markShapes).
 
 import type { OutputLayout, Rect } from "../app/layout";
+import { exportBleedMm } from "../schema/exportSection";
 import type { ProjectSettings } from "../schema/sections";
 
 export interface Stamp {
@@ -42,7 +43,7 @@ export function markShapes(layout: OutputLayout, settings: ProjectSettings, labe
   const cut: Rect = layout.cut;
   const onPage = (x: number, y: number) => x >= 0 && y >= 0 && x <= layout.width && y <= layout.height;
   // Marks start a little outside the cut, and outside any bleed.
-  const bleed = mm(layout, e.bleed);
+  const bleed = mm(layout, exportBleedMm(e));
   const gap = Math.max(mm(layout, 1.5), e.placement === "fill" ? bleed + mm(layout, 1) : 0);
   const len = mm(layout, 5);
 

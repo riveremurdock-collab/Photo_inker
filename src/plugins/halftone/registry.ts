@@ -12,12 +12,13 @@ import { fmDiffusion, fmDiffusionSection } from "./fmDiffusion";
 import { fmStipple, fmStippleSection } from "./fmStipple";
 import type { HalftoneMethod } from "./types";
 
-const METHODS = [amSquare, amNoise, amHex, amSpiral, amRings, fmBlueNoise, fmStipple, fmDiffusion];
+// In the outline's order: AM grids, then FM placements.
+const METHODS = [amSquare, amHex, amNoise, amSpiral, amRings, fmBlueNoise, fmStipple, fmDiffusion];
 
 export const HALFTONE_SECTIONS = [
   amSquareSection,
-  amNoiseSection,
   amHexSection,
+  amNoiseSection,
   amSpiralSection,
   amRingsSection,
   fmBlueNoiseSection,
@@ -25,9 +26,15 @@ export const HALFTONE_SECTIONS = [
   fmDiffusionSection,
 ] as const;
 
+const GROUPS: Record<string, string> = { AM: "Amplitude (AM): dot size shows tone", FM: "Frequency (FM): dot count shows tone" };
+
+/** "AM: square grid" → "Square grid" under the AM heading. */
 export const HALFTONE_TYPE_OPTIONS = [
   { value: "none", label: "None (printer halftone)" },
-  ...METHODS.map((m) => ({ value: m.id, label: m.label })),
+  ...METHODS.map((m) => {
+    const [, prefix = "", name = m.label] = /^(AM|FM): (.*)$/.exec(m.label) ?? [];
+    return { value: m.id, label: name.charAt(0).toUpperCase() + name.slice(1), group: GROUPS[prefix] };
+  }),
 ];
 
 /** The method for a halftone type, or null for "none". */

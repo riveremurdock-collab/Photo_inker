@@ -24,7 +24,7 @@ export const amSpiralSection = defineSection({
   visibleWhen: (s) => s.halftone?.type === "spiral",
   settings: [
     { kind: "number", key: "cellSize", label: "Point spacing", perInk: true, default: 8, min: 2, max: 64, step: 0.5, unit: "px" },
-    { kind: "number", key: "angle", label: "Spiral rotation", perInk: true, default: 0, slotDefaults: [0, 23, 46, 69], min: 0, max: 360, step: 1, unit: "°" },
+    { kind: "number", key: "angle", label: "Spiral rotation", perInk: true, linkInks: false, default: 0, slotDefaults: [0, 23, 46, 69], min: 0, max: 360, step: 1, unit: "°" },
     {
       kind: "number",
       key: "divergence",

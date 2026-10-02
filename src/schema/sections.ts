@@ -131,6 +131,7 @@ export const paletteSection = defineSection({
       step: 1,
       unit: "%",
       help: "Riso inks are transparent (0%). Raise this for dense inks like metallics or white, which partly cover inks printed before them.",
+      collapsed: "Ink opacity (for metallic or white inks)",
     },
   ],
 });
@@ -240,7 +241,11 @@ export const layersSection = defineSection({
 });
 
 // One halftone type for the whole image; each type has its own sub-section
-// (plugins/halftone). The minimum dot size is shared by every type.
+// (plugins/halftone). The minimum dot size is shared by every type, and shown
+// after the chosen type's settings.
+
+/** AM types (grids of dots that grow with tone), which can round light tones up to the minimum dot. */
+const AM_TYPES = ["am", "hex", "noise", "spiral", "rings"];
 export const halftoneSection = defineSection({
   id: "halftone",
   title: "Halftone",
@@ -259,6 +264,7 @@ export const halftoneSection = defineSection({
       unit: "px",
       help: "Smallest dot allowed, in output pixels (1–2 px at 600 DPI). Riso machines struggle to print tiny dots.",
       visibleWhen: (h) => h.type !== "none",
+      placement: "end",
     },
     {
       kind: "select",
@@ -270,7 +276,8 @@ export const halftoneSection = defineSection({
         { value: "drop", label: "Drop to paper" },
         { value: "round", label: "Round up" },
       ],
-      visibleWhen: (h) => h.type === "am",
+      visibleWhen: (h) => AM_TYPES.includes(String(h.type)),
+      placement: "end",
     },
   ],
 });
@@ -378,7 +385,7 @@ export const borderSection = defineSection({
       help: "Positive grows the canvas outward around the image; negative covers the image's edge.",
       visibleWhen: (b) => b.frame !== "none",
     },
-    { kind: "number", key: "frameRadius", label: "Corner radius", default: 0, min: 0, max: 50, step: 0.5, unit: "%", help: "Rounds the corners of the image opening.", visibleWhen: (b) => b.frame !== "none" },
+    { kind: "number", key: "frameRadius", label: "Border corner radius", default: 0, min: 0, max: 50, step: 0.5, unit: "%", help: "Rounds the corners of the image opening.", visibleWhen: (b) => b.frame !== "none" },
   ],
 });
 

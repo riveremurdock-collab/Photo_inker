@@ -336,7 +336,8 @@ body[data-mode="print"] .mode-badge {
   border-bottom: 1px solid var(--color-mint);
 }
 
-.panel-section summary {
+/* Only a section's own heading: collapsible rows inside sections have their own style. */
+.panel-section > summary {
   padding: 10px 16px;
   font-family: var(--font-display);
   font-weight: 700;
@@ -348,7 +349,7 @@ body[data-mode="print"] .mode-badge {
   user-select: none;
 }
 
-.panel-section summary:hover {
+.panel-section > summary:hover {
   background: var(--color-light-sage);
 }
 
@@ -412,6 +413,41 @@ body[data-mode="print"] .mode-badge {
   margin: 0;
   font-size: 12px;
   color: var(--color-olive);
+}
+
+/* Checkboxes sit beside their label, with any help text below both. */
+.control-toggle {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 8px;
+}
+
+.control-toggle .control-body {
+  grid-row: 1;
+  grid-column: 1;
+}
+
+.control-toggle .control-label {
+  grid-row: 1;
+  grid-column: 2;
+  cursor: pointer;
+}
+
+.control-toggle .control-help {
+  grid-column: 1 / -1;
+}
+
+/* Settings tucked into a collapsed row (e.g. ink opacity). */
+.control-more > summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-olive);
+}
+
+.control-more[open] {
+  display: grid;
+  gap: 8px;
 }
 
 .segmented {
@@ -735,6 +771,23 @@ input.swatch-input {
   gap: 6px;
 }
 
+.control-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* "Same for all inks" */
+.control-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--color-olive);
+  cursor: pointer;
+}
+
 .control-group-rows {
   display: grid;
   gap: 6px;
@@ -865,6 +918,18 @@ input.swatch-input {
   color: var(--color-olive);
 }
 
+/* Settings shown after a section's sub-sections (e.g. Halftone's minimum dot). */
+.panel-end {
+  display: grid;
+  gap: 12px;
+  padding: 12px 0 0;
+  border-top: 1px dashed var(--color-mint);
+}
+
+.panel-end:not(:has(> :not([hidden]))) {
+  display: none;
+}
+
 .panel-subsection h3 + .control-help {
   margin-top: -8px;
 }
@@ -937,6 +1002,12 @@ input.swatch-input {
   flex: 1;
   font-size: 12px;
   font-family: ui-monospace, monospace;
+}
+
+.layer-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
 }
 
 .layer-toggle {

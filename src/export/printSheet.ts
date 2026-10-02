@@ -16,8 +16,13 @@ function formatValue(def: SettingDef, value: unknown, inkCount: number): string 
     switch (def.kind) {
       case "number":
         return `${Number(v).toFixed(def.step < 1 ? (def.step < 0.1 ? 2 : 1) : 0)}${def.unit ? (def.unit === "%" || def.unit === "°" ? def.unit : ` ${def.unit}`) : ""}`;
-      case "select":
-        return def.options.find((o) => o.value === v)?.label ?? String(v);
+      case "select": {
+        const opt = def.options.find((o) => o.value === v);
+        if (!opt) return String(v);
+        // Grouped options keep their group's short name, e.g. "AM: Square grid".
+        const short = opt.group ? /\((\w+)\)/.exec(opt.group)?.[1] : undefined;
+        return short ? `${short}: ${opt.label}` : opt.label;
+      }
       case "toggle":
         return v ? "on" : "off";
       case "curve": {
@@ -100,7 +105,7 @@ export async function printSheet(settings: ProjectSettings, layout: OutputLayout
   const lines = [
     `Page: ${pageLabel}${e.pageSize === "image" ? "" : `, ${e.orientation}`} · ${layout.width} × ${layout.height} px at ${dpi} DPI`,
     `Artwork: ${inch(layout.art.width)} × ${inch(layout.art.height)}, ${(layout.art.x / dpi).toFixed(2)} in from the left, ${(layout.art.y / dpi).toFixed(2)} in from the top`,
-    e.pageSize === "image" ? "" : `Placement: ${e.placement} · margins ${e.margin} mm · bleed ${e.bleed} mm`,
+    e.pageSize === "image" ? "" : `Placement: ${e.placement} · margins ${e.units === "mm" ? `${e.margin} mm` : `${e.marginIn} in`} · bleed ${e.units === "mm" ? `${e.bleed} mm` : `${e.bleedIn} in`}`,
     `Marks: ${[e.cropMarks && "crop", e.regMarks && "registration", e.layerLabels && "labels"].filter(Boolean).join(", ") || "none"}`,
     `Source image: ${imageName}`,
   ].filter(Boolean);

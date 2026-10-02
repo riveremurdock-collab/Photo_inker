@@ -49,8 +49,8 @@ export const fmDiffusionSection = defineSection({
       default: "square",
       display: "segmented",
       options: [
-        { value: "square", label: "Square" },
         { value: "round", label: "Round" },
+        { value: "square", label: "Square" },
       ],
     },
     { kind: "toggle", key: "serpentine", label: "Serpentine scanning", default: true, help: "Alternate direction on every row; avoids streaks." },

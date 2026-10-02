@@ -6,6 +6,12 @@
 
 import { defineSection } from "./types";
 
+type All = Record<string, Record<string, unknown> | undefined>;
+/** The effects only show while Simulate printing is on. */
+const simulating = (s: All) => s.printSim?.enabled === true;
+/** Dot gain compensation (Export, riso layers) uses the Dot gain settings even with the simulation off. */
+const compensating = (s: All) => s.upload?.mode === "print" && s.export?.printTarget === "riso" && s.export?.gainCompensation === true;
+
 export const printSimSection = defineSection({
   id: "printSim",
   title: "Print Simulation",
@@ -27,8 +33,9 @@ export const simMisregSection = defineSection({
   stage: "printSim",
   parent: "printSim",
   description: "Each ink layer lands slightly off from the others.",
+  visibleWhen: simulating,
   settings: [
-    { kind: "toggle", key: "on", label: "Misregistration", default: true },
+    { kind: "toggle", key: "on", label: "On", default: true },
     {
       kind: "number",
       key: "shift",
@@ -63,8 +70,9 @@ export const simLowInkSection = defineSection({
   stage: "printSim",
   parent: "printSim",
   description: "Patches where the drum runs short of ink and the print goes grainy and light, mostly in big solid areas.",
+  visibleWhen: simulating,
   settings: [
-    { kind: "toggle", key: "on", label: "Low-ink patches", default: true },
+    { kind: "toggle", key: "on", label: "On", default: true },
     { kind: "number", key: "intensity", label: "Intensity", default: 35, min: 0, max: 100, step: 1, unit: "%", help: "How much ink is lost inside a patch.", visibleWhen: (s) => s.on === true },
     { kind: "number", key: "size", label: "Patch size", default: 15, min: 2, max: 60, step: 0.5, unit: "%", help: "% of the image's shorter side.", visibleWhen: (s) => s.on === true },
     {
@@ -135,9 +143,10 @@ export const simSpecksSection = defineSection({
   stage: "printSim",
   parent: "printSim",
   description: "Small spots of stray ink, and pinholes where ink is missing.",
+  visibleWhen: simulating,
   settings: [
-    { kind: "toggle", key: "on", label: "Specks", default: true },
-    { kind: "toggle", key: "ink", label: "Specks on", perInk: true, default: true, visibleWhen: (s) => s.on === true },
+    { kind: "toggle", key: "on", label: "On", default: true },
+    { kind: "toggle", key: "ink", label: "Specks on these inks", perInk: true, default: true, visibleWhen: (s) => s.on === true },
     { kind: "number", key: "density", label: "Density", default: 30, min: 0, max: 500, step: 1, unit: "/MP", help: "Specks per million output pixels.", visibleWhen: (s) => s.on === true },
     { kind: "number", key: "minSize", label: "Smallest speck", default: 2, min: 1, max: 30, step: 0.5, unit: "px", visibleWhen: (s) => s.on === true },
     { kind: "number", key: "maxSize", label: "Largest speck", default: 6, min: 1, max: 40, step: 0.5, unit: "px", visibleWhen: (s) => s.on === true },
@@ -166,8 +175,10 @@ export const simGainSection = defineSection({
   stage: "printSim",
   parent: "printSim",
   description: "Ink spreads into the paper, so dots print larger and darker. Also used by dot gain compensation (Export, Print mode).",
+  visibleWhen: (s) => simulating(s) || compensating(s),
   settings: [
-    { kind: "toggle", key: "on", label: "Dot gain", default: true },
+    // The gain amount, curve and paper below are also what compensation uses, so they stay visible when this is off.
+    { kind: "toggle", key: "on", label: "On", default: true, help: "Show dot gain in the preview (and Digital exports).", visibleWhen: (_g, s) => simulating(s) },
     { kind: "number", key: "amount", label: "Gain at 50%", perInk: true, default: 12, min: 0, max: 40, step: 0.5, unit: "%", help: "How much darker a 50% tone prints (12% → prints as 62%)." },
     {
       kind: "select",
@@ -194,7 +205,7 @@ export const simGainSection = defineSection({
       ],
       help: "Scales the gain: smooth ×0.6, uncoated ×1, recycled ×1.4.",
     },
-    { kind: "number", key: "roughness", label: "Edge roughness", default: 30, min: 0, max: 100, step: 1, unit: "%", help: "How ragged dot edges become." },
+    { kind: "number", key: "roughness", label: "Edge roughness", default: 30, min: 0, max: 100, step: 1, unit: "%", help: "How ragged dot edges become.", visibleWhen: (g, s) => g.on === true && simulating(s) },
   ],
 });
 

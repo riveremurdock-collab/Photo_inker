@@ -24,7 +24,7 @@ export interface Control {
   /** Sets the shown value without firing change events. */
   update(value: unknown): void;
   /** Dropdowns only: replaces the options (e.g. when the palette's inks change). */
-  setOptions?(options: readonly { value: string; label: string }[]): void;
+  setOptions?(options: readonly { value: string; label: string; group?: string }[]): void;
 }
 
 let idCounter = 0;
@@ -136,16 +136,28 @@ function selectControl(def: SelectSetting, value: string, onChange: ChangeHandle
   const { row: el, body } = row(def, id, label);
   const select = document.createElement("select");
   select.id = id;
-  const setOptions = (options: readonly { value: string; label: string }[]) => {
+  const setOptions = (options: readonly { value: string; label: string; group?: string }[]) => {
     const current = select.value;
-    select.replaceChildren(
-      ...options.map((opt) => {
-        const o = document.createElement("option");
-        o.value = opt.value;
-        o.textContent = opt.label;
-        return o;
-      }),
-    );
+    // Consecutive options with the same group go under one heading.
+    const items: HTMLElement[] = [];
+    let group: HTMLOptGroupElement | null = null;
+    for (const opt of options) {
+      const o = document.createElement("option");
+      o.value = opt.value;
+      o.textContent = opt.label;
+      if (!opt.group) {
+        group = null;
+        items.push(o);
+        continue;
+      }
+      if (group?.label !== opt.group) {
+        group = document.createElement("optgroup");
+        group.label = opt.group;
+        items.push(group);
+      }
+      group.append(o);
+    }
+    select.replaceChildren(...items);
     select.value = current;
   };
   setOptions(def.options);
