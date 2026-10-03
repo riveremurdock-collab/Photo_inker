@@ -4,7 +4,7 @@
 // print order, so reordering permutes every per-ink setting in the project.
 
 import { MAX_INKS } from "../pipeline/coverage";
-import { autoPalette } from "./autoPalette";
+import { autoPalette, type AutoStyle } from "./autoPalette";
 import { generateScheme, type SchemeId } from "./colorSchemes";
 import type { SourceStore } from "./source";
 import type { SettingsStore } from "./store";
@@ -28,6 +28,9 @@ export class PaletteActions {
         (change.key === "source" ||
           change.key === "inkCount" ||
           change.key === "autoIncludeBackground" ||
+          change.key === "autoStyle" ||
+          change.key === "autoVividness" ||
+          change.key === "autoVariant" ||
           (change.key === "paper" && !settings.palette.autoIncludeBackground));
       if (triggers) this.runAuto();
     });
@@ -134,8 +137,12 @@ export class PaletteActions {
   runAuto(): void {
     const image = this.source.get();
     if (!image) return;
-    const { inkCount, autoIncludeBackground, paper } = this.palette;
-    const result = autoPalette(image.bitmap, inkCount, autoIncludeBackground ? null : paper);
+    const { inkCount, autoIncludeBackground, paper, autoStyle, autoVividness, autoVariant } = this.palette;
+    const result = autoPalette(image.bitmap, inkCount, autoIncludeBackground ? null : paper, {
+      style: autoStyle as AutoStyle,
+      vividness: autoVividness / 100,
+      variant: autoVariant,
+    });
 
     const colors = this.palette.inkColor.slice();
     result.inks.forEach((hex, i) => (colors[i] = hex));

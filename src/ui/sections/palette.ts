@@ -72,6 +72,23 @@ export function createPaletteBlock(
   );
   const autoNote = document.createElement("p");
   autoNote.className = "control-help";
+  // Auto style, vividness, and "Try another" (the next palette for the style).
+  const styleControl = createControl(findSetting("palette", "autoStyle")!, store.get().palette.autoStyle, (v) => {
+    // A new style starts from its best palette.
+    store.setValue("palette", "autoStyle", v);
+    store.setValue("palette", "autoVariant", 0);
+  });
+  const vividControl = createControl(findSetting("palette", "autoVividness")!, store.get().palette.autoVividness, (v, commit) =>
+    store.setValue("palette", "autoVividness", v, { commit }),
+  );
+  const tryAnother = document.createElement("button");
+  tryAnother.type = "button";
+  tryAnother.textContent = "Try another";
+  tryAnother.title = "The next palette for this style";
+  tryAnother.addEventListener("click", () => store.setValue("palette", "autoVariant", store.get().palette.autoVariant + 1));
+  const tryRow = document.createElement("div");
+  tryRow.className = "button-row";
+  tryRow.append(tryAnother);
 
   // ---- Scheme ----
   const schemeControl = createControl(findSetting("palette", "scheme")!, store.get().palette.scheme, (v) =>
@@ -85,7 +102,17 @@ export function createPaletteBlock(
   const schemeNote = document.createElement("p");
   schemeNote.className = "control-help";
 
-  element.append(sourceControl.element, schemeControl.element, schemeBgControl.element, includeBgControl.element, autoNote, schemeNote);
+  element.append(
+    sourceControl.element,
+    schemeControl.element,
+    schemeBgControl.element,
+    styleControl.element,
+    vividControl.element,
+    tryRow,
+    includeBgControl.element,
+    autoNote,
+    schemeNote,
+  );
 
   // ---- Inks ----
   const inksHeading = document.createElement("div");
@@ -190,6 +217,12 @@ export function createPaletteBlock(
         : "Ink 1 is the first color: change it and the others follow. Editing another ink, or adding or removing one, switches back to Manual.";
     includeBgControl.update(p.autoIncludeBackground);
     includeBgControl.element.hidden = !isAuto;
+    styleControl.update(p.autoStyle);
+    vividControl.update(p.autoVividness);
+    styleControl.element.hidden = !isAuto;
+    vividControl.element.hidden = !isAuto;
+    tryRow.hidden = !isAuto;
+    tryAnother.disabled = !hasImage;
     autoNote.hidden = !isAuto;
     autoNote.textContent = hasImage
       ? "Colors are picked from the image. Editing a color switches back to Manual."

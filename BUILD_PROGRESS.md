@@ -340,6 +340,11 @@
 - **Undo:** Done is one step. **Presets:** the geometry isn't part of a preset. **New upload:** starts uncropped.
 - **Checked (22 browser checks):** drag resize and move, Cancel, typed values, Done crops the image (800 × 600), undo/redo in one step, straighten shrink and restore, 1:1 + turn + straighten together, panel Reset, a 90° turn swapping width and height, a preset leaving the crop alone, the export at the turned size, a new upload resetting the crop. Full regression and the 28 undo/preset checks still pass.
 
+### Auto palette styles (2026-10-02)
+- **Palette › Auto** gets a **Style** (Balanced, Vibrant, Contrasting), **Vividness** (0–100%) and **Try another**. Balanced with no "Try another" is the original algorithm.
+- **How:** besides one k-means cluster per ink, the image gives about 12 candidates over all pixels plus up to 8 over the colorful ones (the top 40% by chroma, grouped mostly by hue), each with its share, strongest and most saturated version. Every set of inks among them is scored for the style; "Try another" steps down the ranking, skipping sets within ΔE 12 of one already offered. Vibrant uses the most saturated versions and adds a 40% saturation boost; Vividness pushes toward the most saturated in-gamut color of the same hue and lightness.
+- **Found while testing:** clustering all pixels equally averaged small colorful areas away, so the first Vibrant still looked brown; the colorful-pixel candidates and the built-in boost fixed it. On low-saturation photos (desert, dusk sky) no style can pick vivid colors from the image alone, which is what Vividness is for. With Ink Matching the print still reproduces the photo, so the styles show most with Tone Map, Channel Split or a higher "Prefer fewer inks".
+
 ## Open questions
 
 - None right now.
