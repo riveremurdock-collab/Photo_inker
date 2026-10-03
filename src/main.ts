@@ -19,6 +19,8 @@ import { createExportBlock } from "./ui/sections/export";
 import { createChannelSplitBlock } from "./ui/sections/channelSplit";
 import { createSelectiveColorBlock } from "./ui/sections/selectiveColor";
 import { outputLayout } from "./app/layout";
+import { History } from "./app/history";
+import { createPresetsBlock } from "./ui/sections/presets";
 import { layerLabels, markShapes } from "./export/marks";
 import { GPU_RESET_MESSAGE } from "./export/exporter";
 
@@ -34,12 +36,38 @@ const PREVIEW_BACKGROUND: [number, number, number] = [0xed, 0xf2, 0xe9].map((v) 
 function start(root: HTMLElement): void {
   const settings = new SettingsStore();
   const source = new SourceStore();
+  const history = new History(settings);
+  const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+  const shortcut = (key: string, shift = false) => `${isMac ? "⌘" : "Ctrl+"}${shift ? (isMac ? "⇧" : "Shift+") : ""}${key}`;
 
   // ---- Header ----
   const header = document.createElement("header");
   header.className = "app-header";
   header.innerHTML = `<h1 class="app-title">Photo Inker</h1><span class="mode-badge"></span>`;
   const modeBadge = header.querySelector<HTMLElement>(".mode-badge")!;
+
+  // ---- Undo / redo ----
+  const historyButtons = document.createElement("div");
+  historyButtons.className = "history-buttons";
+  const historyButton = (label: string, icon: string, title: string, run: () => void) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "history-button";
+    b.innerHTML = `<span aria-hidden="true">${icon}</span> ${label}`;
+    b.title = title;
+    b.addEventListener("click", run);
+    historyButtons.append(b);
+    return b;
+  };
+  const undoButton = historyButton("Undo", "↶", `Undo (${shortcut("Z")})`, () => history.undo());
+  const redoButton = historyButton("Redo", "↷", `Redo (${shortcut("Z", true)})`, () => history.redo());
+  const showHistory = () => {
+    undoButton.disabled = !history.canUndo;
+    redoButton.disabled = !history.canRedo;
+  };
+  history.subscribe(showHistory);
+  showHistory();
+  header.append(historyButtons);
 
   // ---- Notices (errors and info), shown over the preview ----
   const notice = document.createElement("div");
@@ -82,11 +110,15 @@ function start(root: HTMLElement): void {
     uploadBlock.setBusy(true);
     try {
       const bitmap = await loadImageFile(file);
-      source.set(file.name, bitmap);
-      if (nameFollowsFile) {
-        settings.set("upload", "projectName", baseName(file.name).slice(0, 60));
-        nameFollowsFile = true; // the set() above isn't a user edit
-      }
+      // A new image isn't an undo step, and neither are the changes that come with
+      // it (the project name following the file, an Auto palette picking colors).
+      history.silently(() => {
+        source.set(file.name, bitmap);
+        if (nameFollowsFile) {
+          settings.set("upload", "projectName", baseName(file.name).slice(0, 60));
+          nameFollowsFile = true; // the set() above isn't a user edit
+        }
+      });
     } catch (err) {
       showNotice(err instanceof UploadError ? err.message : "Something went wrong opening that image.");
       if (!(err instanceof UploadError)) console.error(err);
@@ -181,6 +213,7 @@ function start(root: HTMLElement): void {
   // ---- Panel ----
   const panel = new Panel(settings, {
     upload: uploadBlock.element,
+    presets: createPresetsBlock(settings),
     palette: paletteBlock,
     splitToneMap: createToneMapBlock(settings, pipeline),
     layers: createLayersBlock(settings),
@@ -229,8 +262,9 @@ function start(root: HTMLElement): void {
 
   settings.subscribe((_, change) => {
     showPage();
-    if (change.section === "upload" && change.key === "mode") showMode();
-    if (change.section === "palette" && change.key === "paper") showPaper();
+    // "*": every setting at once (undo, redo, a preset).
+    if (change.section === "*" || (change.section === "upload" && change.key === "mode")) showMode();
+    if (change.section === "*" || (change.section === "palette" && change.key === "paper")) showPaper();
     // A typed project name stops following the uploaded file's name.
     if (change.section === "upload" && change.key === "projectName") nameFollowsFile = false;
     if (DEBUG && change.commit) {
@@ -242,6 +276,17 @@ function start(root: HTMLElement): void {
   // ---- Keyboard shortcuts (ignored while typing in a field) ----
   window.addEventListener("keydown", (e) => {
     const target = e.target as HTMLElement | null;
+    // Undo / redo everywhere except text and number fields, which keep their own text undo.
+    const typing = target instanceof HTMLInputElement ? ["text", "number", "search"].includes(target.type) : target?.tagName === "TEXTAREA";
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !typing) {
+      const key = e.key.toLowerCase();
+      if (key === "z" || key === "y") {
+        e.preventDefault();
+        if (key === "y" || e.shiftKey) history.redo();
+        else history.undo();
+        return;
+      }
+    }
     if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA")) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === "0") preview.fit();

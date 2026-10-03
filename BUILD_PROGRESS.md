@@ -328,6 +328,12 @@
 - **Measured (Intel UHD 630):** tile 2.8 s (maze) to 6.2 s (ordered); Whole image with Follow image on a Letter page at 600 DPI, own pattern per ink: 111 s for 3 inks (about 37 s per ink, 12 M texels each), with progress in the status bar. Tone vs smooth coverage on a gray ramp, per 1/12 band: within 0.6 points (maze and spots) and 1.2 points (ordered, branching 80%), after measuring the distribution with the same bilinear interpolation the halftone uses (raw texels gave up to 4.5 points: light tones too light, dark too dark).
 - **Checked:** cancelling builds mid-way frees their textures; a too-large whole-image field gives a notice; riso (with proof) and digital exports; all 10 halftone types × 5 split methods × modes × simulation with no errors.
 
+### Undo / redo and presets (2026-10-02)
+- **Undo / redo** in the header (and Ctrl/⌘+Z, Ctrl/⌘+Shift+Z, Ctrl+Y): one step per finished change, including everything that follows from it at once. Uploading an image is not a step. Up to 200 steps.
+- **Presets** section under Upload: save the current look in this browser (by name; same name replaces), download it as a `.json` file, apply or delete saved ones, upload a preset file (applied and saved). A preset holds the look only, not mode, project name or export/page settings. Applying is one undo step.
+- **Panel:** linked per-ink sliders whose values differ after an undo or a preset show unlinked instead of being forced back together (only a newly added ink joins the shared value).
+- **Checked (28 browser checks):** a slider drag is one step; a color scheme and adding an ink each undo in one step; different per-ink values survive undo; keyboard shortcuts; the mode badge follows undo; save, download, apply (look restored, export untouched), undo of apply, upload of the downloaded file, broken and foreign JSON files, garbage values falling back to defaults, the saved list surviving a reload, delete. Full regression of all halftone/split/mode/simulation combinations: no errors.
+
 ## Open questions
 
 - None right now.

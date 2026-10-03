@@ -77,14 +77,15 @@ All app settings live in one typed **`ProjectSettings`** object held by `app/sto
 - **Inks.** Inks are per-ink settings in slots 0..`inkCount`-1, and slot order is print order. `SettingsStore.permuteInks(order)` reorders every per-ink setting in every section at once, so an ink's settings travel with it.
 - **Select groups.** An option's `group` puts it under a heading in the dropdown (the halftone types: AM, then FM).
 - **Generated UI.** Controls are generated from the schema. Sections with special UI (palette list, histogram band handles, curve editors) add a custom builder, but their values still live in the settings object and are still described by `SettingDef`s.
-- **Walking the schema.** Presets, save/load, and randomize (later) only walk the schema.
-  - Defaults: `defaultsFor(schema)`.
+- **Walking the schema.** Presets and randomize (later) only walk the schema.
+  - Defaults: `defaultsForSection(section)`.
   - Randomize: pick within `min`/`max`/`options`.
-  - Save: JSON of `ProjectSettings` with a `version` field.
 - **Commit pattern (from the stipple tool).**
-  - Dragging a slider calls `preview(patch)`, which updates the preview but not undo history.
-  - Releasing it calls `commit(patch)`, which records undo (later).
+  - Dragging a slider sets values with `commit: false` (updates the preview, not undo history).
+  - Releasing it sets them with `commit: true`.
   - Both paths go through the same pipeline invalidation.
+- **Undo / redo** (`app/history.ts`): each committed change is a step, with every follow-up change in the same task (schemes regenerating inks, unit conversion, a new ink joining linked sliders) grouped in; a step stores the settings object from before it (immutable updates, so snapshots share structure). Undo and redo restore with `SettingsStore.replace()`, one change for section `"*"` that nothing treats as a single edit (no auto palette or scheme regeneration) and that the pipeline handles by its usual keys. The image isn't in history; changes that come with an upload are folded in with `History.silently()`. Buttons in the header; Ctrl/⌘+Z, Ctrl/⌘+Shift+Z and Ctrl+Y (text fields keep their own undo).
+- **Presets** (`app/presets.ts`, `ui/sections/presets.ts`): the look (every section except Upload and Export, and without layer solo/mute) as JSON `{ app, kind: "preset", version, name, savedAt, settings }`. Loading checks each setting against its definition (`coerceValue`, plus a shape check for curves); missing settings get defaults, unknown ones are ignored. Saved in the browser's localStorage (guarded; the panel falls back to files) and as `.photo-inker.json` downloads. Applying is one undo step.
 
 ## 4. Plugin interfaces
 
@@ -263,7 +264,7 @@ Code is copied in, never linked, and each file notes where it came from.
 | `separation/neugebauer.ts` `solveCoverage`, `lut.ts` | starting point for Ink Matching (rewritten on spectral model) | Step 4 |
 | `engine/grain.ts` min dot constant | min dot size default | Step 5 |
 | `output/sizeUnits.ts`, `downloadBlob` | export sizing | Step 6 |
-| `settings/presetStorage.ts`, undo snapshots | presets / undo | later |
+| `settings/presetStorage.ts`, undo snapshots | presets / undo (rewritten: `app/presets.ts`, `app/history.ts`) | Undo & presets |
 
 Written fresh:
 - **Void-and-cluster threshold maps and error diffusion.** The stipple tool only has best-candidate point lists.

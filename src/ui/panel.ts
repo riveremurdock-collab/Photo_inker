@@ -225,6 +225,7 @@ export class Panel {
 
     let signature = "";
     let controls: Control[] = [];
+    let lastInkCount = store.get().palette.inkCount;
 
     return {
       sectionId,
@@ -236,12 +237,16 @@ export class Panel {
         const active = values.slice(0, inkCount);
         const allSame = active.every((v) => v === active[0]);
         linked ??= def.linkInks !== false && allSame;
+        const added = inkCount > lastInkCount;
+        lastInkCount = inkCount;
+        // Linked inks that differ: a just-added ink joins the shared value; otherwise
+        // (undo, a preset) the values are real, so show them unlinked rather than overwrite them.
+        if (linked && !allSame && !added) linked = false;
         const showLinked = linkable && linked && inkCount > 1;
         if (linkable) {
           linkBox.checked = showLinked;
           linkBox.parentElement!.hidden = inkCount < 2;
         }
-        // A linked group whose inks drifted apart (e.g. an ink was just added): bring them back together.
         if (showLinked && !allSame) queueMicrotask(() => setAll(values[0], true));
 
         const nextSignature = `${inkCount}|${inkColor.join("|")}|${showLinked}`;

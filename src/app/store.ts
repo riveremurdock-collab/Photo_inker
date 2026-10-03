@@ -84,6 +84,16 @@ export class SettingsStore {
     this.emit({ section: "*", key: "inkSlots", stage: "split", commit: true });
   }
 
+  /**
+   * Replaces every setting at once (undo/redo, loading a preset). Listeners get
+   * one change for section "*": nothing reacts to it as a single edit (no auto
+   * palette or scheme regeneration), and the pipeline reruns whatever differs.
+   */
+  replace(settings: ProjectSettings): void {
+    this.settings = settings;
+    this.emit({ section: "*", key: "replace", stage: "upload", commit: true });
+  }
+
   private updateAllPerInk(fn: (def: SettingDef, values: unknown[]) => unknown[]): void {
     const next = { ...this.settings } as Record<string, Record<string, unknown>>;
     for (const section of SECTIONS as readonly SectionSchema[]) {

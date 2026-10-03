@@ -38,6 +38,15 @@ export const uploadSection = defineSection({
   ],
 });
 
+// Saving and loading presets of the look: all custom UI (ui/sections/presets.ts),
+// no settings of its own.
+export const presetsSection = defineSection({
+  id: "presets",
+  title: "Presets",
+  stage: null,
+  settings: [],
+});
+
 // The palette's controls are a custom block (ui/sections/palette.ts), so every
 // setting here is hidden from the generated panel.
 export const paletteSection = defineSection({
@@ -392,6 +401,7 @@ export const borderSection = defineSection({
 
 export const SECTIONS = [
   uploadSection,
+  presetsSection,
   paletteSection,
   adjustSection,
   splitSection,
