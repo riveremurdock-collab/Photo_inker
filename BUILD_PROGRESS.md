@@ -334,6 +334,12 @@
 - **Panel:** linked per-ink sliders whose values differ after an undo or a preset show unlinked instead of being forced back together (only a newly added ink joins the shared value).
 - **Checked (28 browser checks):** a slider drag is one step; a color scheme and adding an ink each undo in one step; different per-ink values survive undo; keyboard shortcuts; the mode badge follows undo; save, download, apply (look restored, export untouched), undo of apply, upload of the downloaded file, broken and foreign JSON files, garbage values falling back to defaults, the saved list surviving a reload, delete. Full regression of all halftone/split/mode/simulation combinations: no errors.
 
+### Crop, rotate and straighten (2026-10-02)
+- **Image Adjustments › Crop & rotate:** a button opens the crop editor over the preview (Reset goes back to the photo as uploaded; a line says what is applied). The editor shows the whole photo with a crop box: drag corners and edges, drag inside to move, aspect ratios (Free, Original, Page in Print mode, 1:1, 4:5, 2:3, 3:4, 16:9) with a portrait/landscape swap, rotate left/right 90°, straighten ±45° (with a finer grid while straightening), exact X/Y/W/H in px, Reset, Cancel (Esc), Done (Enter).
+- **Straightening auto-crops:** the crop always stays inside the tilted photo; straightening shrinks it from the crop you had, so straightening back restores it.
+- **Undo:** Done is one step. **Presets:** the geometry isn't part of a preset. **New upload:** starts uncropped.
+- **Checked (22 browser checks):** drag resize and move, Cancel, typed values, Done crops the image (800 × 600), undo/redo in one step, straighten shrink and restore, 1:1 + turn + straighten together, panel Reset, a 90° turn swapping width and height, a preset leaving the crop alone, the export at the turned size, a new upload resetting the crop. Full regression and the 28 undo/preset checks still pass.
+
 ## Open questions
 
 - None right now.

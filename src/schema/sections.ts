@@ -146,11 +146,20 @@ export const paletteSection = defineSection({
 });
 
 // Applied to the image before color splitting, so they affect every method.
+// Crop, rotate and straighten (edited in the crop editor, ui/preview/cropEditor.ts)
+// make the image itself from the uploaded photo (app/crop.ts); they belong to
+// the photo, so presets leave them out.
 export const adjustSection = defineSection({
   id: "adjust",
   title: "Image Adjustments",
   stage: "adjust",
   settings: [
+    { kind: "number", key: "turn", label: "Rotation", default: 0, min: 0, max: 270, step: 90, unit: "°", hidden: true, stage: "upload" },
+    { kind: "number", key: "straighten", label: "Straighten", default: 0, min: -45, max: 45, step: 0.1, unit: "°", hidden: true, stage: "upload" },
+    { kind: "number", key: "cropX", label: "Crop left", default: 0, min: 0, max: 1, step: 0.0001, hidden: true, stage: "upload" },
+    { kind: "number", key: "cropY", label: "Crop top", default: 0, min: 0, max: 1, step: 0.0001, hidden: true, stage: "upload" },
+    { kind: "number", key: "cropW", label: "Crop width", default: 1, min: 0.002, max: 1, step: 0.0001, hidden: true, stage: "upload" },
+    { kind: "number", key: "cropH", label: "Crop height", default: 1, min: 0.002, max: 1, step: 0.0001, hidden: true, stage: "upload" },
     { kind: "number", key: "blackPoint", label: "Levels: black point", default: 0, min: 0, max: 100, step: 0.5, unit: "%" },
     { kind: "number", key: "whitePoint", label: "Levels: white point", default: 100, min: 0, max: 100, step: 0.5, unit: "%" },
     {

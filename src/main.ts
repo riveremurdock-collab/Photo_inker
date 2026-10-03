@@ -20,6 +20,9 @@ import { createChannelSplitBlock } from "./ui/sections/channelSplit";
 import { createSelectiveColorBlock } from "./ui/sections/selectiveColor";
 import { outputLayout } from "./app/layout";
 import { History } from "./app/history";
+import { applyGeometry, GEOMETRY_KEYS, geometryOf } from "./app/crop";
+import { CropEditor } from "./ui/preview/cropEditor";
+import { createCropBlock } from "./ui/sections/crop";
 import { createPresetsBlock } from "./ui/sections/presets";
 import { layerLabels, markShapes } from "./export/marks";
 import { GPU_RESET_MESSAGE } from "./export/exporter";
@@ -97,6 +100,25 @@ function start(root: HTMLElement): void {
     notice.hidden = false;
   };
 
+  // ---- The photo: as uploaded, and cropped / rotated (app/crop.ts) ----
+  // `source` holds the edited image everything else works on; it is rebuilt
+  // from the original whenever the crop, rotation or straightening changes.
+  let original: { fileName: string; bitmap: ImageBitmap } | null = null;
+  let appliedGeometry = "";
+  let resettingGeometry = false;
+  const showGeometry = () => {
+    if (!original || resettingGeometry) return;
+    const g = geometryOf(settings.get().adjust as unknown as Record<string, unknown>);
+    const key = JSON.stringify(g);
+    if (key === appliedGeometry) return;
+    appliedGeometry = key;
+    const edited = applyGeometry(original.bitmap, g);
+    source.set(original.fileName, edited, edited !== original.bitmap);
+  };
+  settings.subscribe((_, change) => {
+    if (change.section === "*" || (change.section === "adjust" && (GEOMETRY_KEYS as readonly string[]).includes(change.key))) showGeometry();
+  });
+
   // ---- Upload handling ----
   let nameFollowsFile = true;
   const uploadBlock = createUploadBlock((files) => void handleFiles(files));
@@ -113,7 +135,15 @@ function start(root: HTMLElement): void {
       // A new image isn't an undo step, and neither are the changes that come with
       // it (the project name following the file, an Auto palette picking colors).
       history.silently(() => {
-        source.set(file.name, bitmap);
+        const previous = original;
+        original = { fileName: file.name, bitmap };
+        // A new photo starts uncropped.
+        resettingGeometry = true;
+        for (const key of GEOMETRY_KEYS) settings.setValue("adjust", key, key === "cropW" || key === "cropH" ? 1 : 0);
+        resettingGeometry = false;
+        appliedGeometry = "";
+        showGeometry();
+        if (previous && previous.bitmap !== bitmap) previous.bitmap.close();
         if (nameFollowsFile) {
           settings.set("upload", "projectName", baseName(file.name).slice(0, 60));
           nameFollowsFile = true; // the set() above isn't a user edit
@@ -161,6 +191,8 @@ function start(root: HTMLElement): void {
     return;
   }
   preview.element.append(notice);
+  const cropEditor = new CropEditor({ store: settings, original: () => original?.bitmap ?? null });
+  preview.element.append(cropEditor.element);
   // The GPU driver can reset (e.g. after a very long draw); the WebGL context is then gone for good.
   preview.onContextLost(() => showNotice(GPU_RESET_MESSAGE, "error", { label: "Reload", onClick: () => location.reload() }));
 
@@ -221,6 +253,7 @@ function start(root: HTMLElement): void {
     halftoneHex: createHexBlock(settings),
     splitChannel: createChannelSplitBlock(settings),
     splitSelective: createSelectiveColorBlock(settings, source, eyedropper),
+    adjust: createCropBlock(settings, source, cropEditor),
   }, {
     export: createExportBlock(settings, source, pipeline),
   });
@@ -277,6 +310,8 @@ function start(root: HTMLElement): void {
   window.addEventListener("keydown", (e) => {
     const target = e.target as HTMLElement | null;
     // Undo / redo everywhere except text and number fields, which keep their own text undo.
+    // The crop editor keeps its own keys (Escape, Enter) and its edits aren't settings until Done.
+    if (cropEditor.open) return;
     const typing = target instanceof HTMLInputElement ? ["text", "number", "search"].includes(target.type) : target?.tagName === "TEXTAREA";
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !typing) {
       const key = e.key.toLowerCase();

@@ -85,6 +85,7 @@ All app settings live in one typed **`ProjectSettings`** object held by `app/sto
   - Releasing it sets them with `commit: true`.
   - Both paths go through the same pipeline invalidation.
 - **Undo / redo** (`app/history.ts`): each committed change is a step, with every follow-up change in the same task (schemes regenerating inks, unit conversion, a new ink joining linked sliders) grouped in; a step stores the settings object from before it (immutable updates, so snapshots share structure). Undo and redo restore with `SettingsStore.replace()`, one change for section `"*"` that nothing treats as a single edit (no auto palette or scheme regeneration) and that the pipeline handles by its usual keys. The image isn't in history; changes that come with an upload are folded in with `History.silently()`. Buttons in the header; Ctrl/⌘+Z, Ctrl/⌘+Shift+Z and Ctrl+Y (text fields keep their own undo).
+- **Crop & rotate** (`app/crop.ts`, `ui/preview/cropEditor.ts`): settings `turn`, `straighten`, `cropX/Y/W/H` (fractions of the turned frame) in Image Adjustments, hidden from the generated panel. `main.ts` keeps the uploaded original and puts the edited copy in `SourceStore` (which only closes bitmaps it owns), so the pipeline, eyedropper, auto palette, layout and export all just see a smaller or turned image. The editor overlays the preview, draws from a ≤ 2048 px copy on a 2D canvas, keeps the crop inside the tilted photo (corner sets of fitting rectangles are convex, so `fitBetween` binary-searches the closest fitting one), and commits on Done with one `store.replace` (one undo step). Presets leave the geometry alone; a new upload resets it.
 - **Presets** (`app/presets.ts`, `ui/sections/presets.ts`): the look (every section except Upload and Export, and without layer solo/mute) as JSON `{ app, kind: "preset", version, name, savedAt, settings }`. Loading checks each setting against its definition (`coerceValue`, plus a shape check for curves); missing settings get defaults, unknown ones are ignored. Saved in the browser's localStorage (guarded; the panel falls back to files) and as `.photo-inker.json` downloads. Applying is one undo step.
 
 ## 4. Plugin interfaces
@@ -143,6 +144,7 @@ upload → fadeBorder → adjust → split → layerOptions → halftone → bor
 | Stage | Input | Output | Main settings |
 |---|---|---|---|
 | upload | file | oriented, size-limited RGBA (full res + preview-res copy) | file, max size |
+| (crop) | uploaded photo | the image everything works on: turned, straightened, cropped (`app/crop.ts`, drawn once per change, before the pipeline) | Image Adjustments › Crop & rotate |
 | fadeBorder | image | image with vignette to black/white | Border › Fade |
 | adjust | image | adjusted linear-light image | Image Adjustments |
 | split | image + inks | `CoverageSet` | Color Splitting method + its settings, palette |

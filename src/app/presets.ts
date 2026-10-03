@@ -3,8 +3,8 @@
 // list of presets saved in this browser.
 //
 // Not included: Upload (mode, project name) and Export (page, resolution,
-// files), so loading a style never changes the page or the file names; and
-// the preview-only layer solo/mute.
+// files), so loading a style never changes the page or the file names; the
+// photo's crop, rotation and straightening; and the preview-only layer solo/mute.
 //
 // Loading walks the schema: each setting in the file is checked against its
 // definition (coerceValue, plus a shape check for curves); settings missing
@@ -21,8 +21,8 @@ const STORAGE_KEY = "photo-inker.presets.v1";
 
 /** Sections a preset leaves alone. */
 const NOT_IN_PRESETS = new Set(["upload", "presets", "export"]);
-/** Preview-only settings, kept as they are when a preset is applied. */
-const PREVIEW_ONLY = new Set(["layers.solo", "layers.mute"]);
+/** Settings kept as they are when a preset is applied: the photo's geometry, and preview-only ones. */
+const KEPT_ON_APPLY = new Set(["adjust.turn", "adjust.straighten", "adjust.cropX", "adjust.cropY", "adjust.cropW", "adjust.cropH", "layers.solo", "layers.mute"]);
 
 export interface PresetFile {
   app: typeof APP;
@@ -44,7 +44,7 @@ export function makePreset(name: string, settings: ProjectSettings): PresetFile 
   for (const section of lookSections()) {
     const values: Record<string, unknown> = {};
     for (const def of section.settings) {
-      if (!PREVIEW_ONLY.has(`${section.id}.${def.key}`)) values[def.key] = all[section.id]?.[def.key];
+      if (!KEPT_ON_APPLY.has(`${section.id}.${def.key}`)) values[def.key] = all[section.id]?.[def.key];
     }
     look[section.id] = values;
   }
@@ -102,7 +102,7 @@ export function applyPreset(current: ProjectSettings, preset: PresetFile): Proje
     const values = preset.settings[section.id] ?? {};
     const out: Record<string, unknown> = { ...next[section.id] };
     for (const def of section.settings) {
-      if (PREVIEW_ONLY.has(`${section.id}.${def.key}`)) continue;
+      if (KEPT_ON_APPLY.has(`${section.id}.${def.key}`)) continue;
       out[def.key] = def.key in values ? checked(def, JSON.parse(JSON.stringify(values[def.key])), defaults[def.key]) : defaults[def.key];
     }
     next[section.id] = out;

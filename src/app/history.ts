@@ -110,7 +110,8 @@ export class History {
     } finally {
       this.restoring = false;
     }
-    this.baseline = settings;
+    // Whatever followed from the restore (e.g. an Auto palette refitting a re-cropped photo) is part of it.
+    this.baseline = this.store.get();
     this.notify();
   }
 
